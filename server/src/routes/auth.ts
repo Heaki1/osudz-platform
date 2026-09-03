@@ -1,28 +1,75 @@
+// osu! OAuth2 login.
+//
+// Flow: /login issues a state nonce and redirects to osu!; osu! redirects the
+// browser back to /callback with a code; /callback verifies the state, trades the
+// code for a token, reads the profile, upserts the user, sets the session cookie,
+// and sends the browser back to the SPA.
+//
+// The redirect target is PUBLIC_BASE_URL (the Vite origin, 8443), not this
+// server's port — /api is proxied, so the whole round trip stays on one origin
+// and the session cookie is first-party.
+
 import { Router } from 'express';
+import { env } from '../env.js';
+import { authorizeUrl, exchangeCode, fetchMe } from '../services/osu.js';
+import {
+  issueState,
+  consumeState,
+  setSession,
+  readSession,
+  clearSession,
+} from '../session.js';
+import { upsertFromOsu, findByOsuId, toApiUser } from '../repo/users.js';
 
 const router = Router();
 
-// GET /api/auth/me — returns the session user or null
-router.get('/me', (_req, res) => {
-  // TODO: read session cookie and return authenticated user
-  res.json(null);
-});
-
-// GET /api/auth/login — redirects to osu! OAuth2 authorization endpoint
+// GET /api/auth/login — redirect to osu! for authorization
 router.get('/login', (_req, res) => {
-  // TODO: build osu! OAuth2 URL and redirect
-  res.status(501).json({ error: 'OAuth not yet configured' });
+  res.redirect(authorizeUrl(issueState(res)));
 });
 
-// GET /api/auth/callback — osu! OAuth2 callback
-router.get('/callback', (_req, res) => {
-  // TODO: exchange code for token, upsert user, set session
-  res.status(501).json({ error: 'OAuth not yet configured' });
+// GET /api/auth/callback — osu! sends the browser here with ?code&state
+router.get('/callback', async (req, res) => {
+  // Failures land back on the SPA with a reason rather than showing raw JSON.
+  const fail = (reason: string) =>
+    res.redirect(`${env.publicBaseUrl}/?auth=failed&reason=${encodeURIComponent(reason)}`);
+
+  if (typeof req.query.error === 'string') return fail(req.query.error);
+  if (!consumeState(req, res, req.query.state)) return fail('state_mismatch');
+
+  const code = req.query.code;
+  if (typeof code !== 'string' || code === '') return fail('missing_code');
+
+  try {
+    const me = await fetchMe(await exchangeCode(code));
+    if (me.is_restricted) return fail('account_restricted');
+
+    const user = await upsertFromOsu(me);
+    setSession(res, Number(user.osu_id));
+    return res.redirect(env.publicBaseUrl);
+  } catch (err) {
+    console.error('[auth] callback failed:', err instanceof Error ? err.message : err);
+    return fail('login_failed');
+  }
+});
+
+// GET /api/auth/me — the session user, or null when signed out
+router.get('/me', async (req, res) => {
+  const osuId = readSession(req);
+  if (osuId === null) return res.json(null);
+
+  try {
+    const user = await findByOsuId(osuId);
+    return res.json(user ? toApiUser(user) : null);
+  } catch (err) {
+    console.error('[auth] /me lookup failed:', err instanceof Error ? err.message : err);
+    return res.status(503).json({ error: 'Database unavailable' });
+  }
 });
 
 // POST /api/auth/logout
 router.post('/logout', (_req, res) => {
-  // TODO: destroy session
+  clearSession(res);
   res.json({ ok: true });
 });
 

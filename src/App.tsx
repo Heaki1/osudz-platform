@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavHeader, AuthUser } from './components/platform/NavHeader';
 import { DashboardPage } from './components/platform/DashboardPage';
 import { VotePage } from './components/platform/VotePage';
@@ -7,24 +7,49 @@ import { AdminDashboard } from './components/platform/AdminDashboard';
 import { PlatformSubmitPage } from './components/platform/PlatformSubmitPage';
 import { ArchivePage } from './components/platform/ArchivePage';
 import { votingBeatmaps } from './components/platform/sampleData';
+import { api, ApiUser } from './api/client';
 import { Beatmap, Phase, PlatformPage } from './types';
 
 type PlayState = { id: string; progress: number; audio?: HTMLAudioElement };
 
-// DEV ONLY — stands in for a real session until osu! OAuth lands.
-// Replace with `api.auth.me()` (src/api/client.ts) and a redirect to
-// `api.auth.loginUrl()`; nothing else in the app depends on this constant.
-const DEV_USER: AuthUser = { username: 'helixia_dz', rank: 12043, country: 'DZ' };
+const toAuthUser = (u: ApiUser): AuthUser => ({
+  username: u.username,
+  rank: u.globalRank,
+  country: u.country,
+});
 
 export default function App() {
   const [platformPage, setPlatformPage] = useState<PlatformPage>('dashboard');
   const [platformPhase, setPlatformPhase] = useState<Phase>('submission');
   const [platformUser, setPlatformUser] = useState<AuthUser | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [maps, setMaps] = useState<Beatmap[]>(votingBeatmaps);
   const [playState, setPlayState] = useState<PlayState | null>(null);
 
-  const handleLogin = () => setPlatformUser(DEV_USER);
-  const handleLogout = () => setPlatformUser(null);
+  // Restore the session on load. api.auth.me() resolves to null both when signed
+  // out and when the API is unreachable, so a backend that is down reads as
+  // "logged out" rather than breaking the page.
+  useEffect(() => {
+    api.auth.me().then((user) => {
+      if (user) setPlatformUser(toAuthUser(user));
+    });
+
+    // The OAuth callback redirects here with ?auth=failed&reason=… on failure.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth') === 'failed') {
+      setAuthError(params.get('reason') ?? 'unknown');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  const handleLogin = () => {
+    window.location.href = api.auth.loginUrl();
+  };
+
+  const handleLogout = async () => {
+    await api.auth.logout();
+    setPlatformUser(null);
+  };
 
   const handleTogglePlay = (id: string) => {
     setPlayState((prev) => {
@@ -83,6 +108,24 @@ export default function App() {
         onLogin={handleLogin}
         onLogout={handleLogout}
       />
+
+      {authError && (
+        <div className="bg-rose-500/10 border-b border-rose-500/30 px-6 py-2.5 flex items-center justify-between gap-4">
+          <p className="text-xs text-rose-300">
+            osu! login failed (<span className="font-mono">{authError}</span>). Most often the
+            callback URL registered on the osu! application does not match{' '}
+            <span className="font-mono">OSU_REDIRECT_URI</span>.
+          </p>
+          <button
+            type="button"
+            onClick={() => setAuthError(null)}
+            className="text-rose-400 hover:text-rose-300 text-xs font-bold px-2 flex-shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <main>
         {platformPage === 'dashboard' && (
           <DashboardPage

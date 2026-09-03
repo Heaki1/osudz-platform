@@ -4,9 +4,12 @@ import { Home, Upload, Trophy, Search, Shield, LogOut, ChevronDown, Archive } fr
 
 export interface AuthUser {
   username: string;
-  rank: number;
+  rank: number | null;
   country: string;
 }
+
+// osu! reports no global_rank for unranked or inactive accounts.
+const formatRank = (rank: number | null) => (rank === null ? 'unranked' : `#${rank.toLocaleString()}`);
 
 const phaseConfig: Record<Phase, { label: string; color: string; bar: string; badgeBg: string; badgeBorder: string; dot: string; countdown: string }> = {
   submission: {
@@ -115,7 +118,7 @@ export function NavHeader({ page, phase, onNavigate, user, onLogin, onLogout }: 
               </div>
               <div className="leading-none">
                 <p className="text-[12px] font-bold text-white">{user.username}</p>
-                <p className="text-[9px] text-slate-500 font-mono">#{user.rank.toLocaleString()}</p>
+                <p className="text-[9px] text-slate-500 font-mono">{formatRank(user.rank)}</p>
               </div>
               <ChevronDown className="w-3 h-3 text-slate-500" />
             </div>
@@ -123,7 +126,7 @@ export function NavHeader({ page, phase, onNavigate, user, onLogin, onLogout }: 
             <div className="absolute top-full right-0 mt-2 w-44 bg-[#0d1526] border border-slate-800 rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
               <div className="px-4 py-3 border-b border-slate-800">
                 <p className="text-xs font-bold text-white">{user.username}</p>
-                <p className="text-[10px] text-slate-500">{user.country} · #{user.rank.toLocaleString()}</p>
+                <p className="text-[10px] text-slate-500">{user.country} · {formatRank(user.rank)}</p>
               </div>
               <button
                 type="button"

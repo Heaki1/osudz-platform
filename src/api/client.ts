@@ -8,6 +8,8 @@ export interface ApiUser {
   username: string;
   country: string;
   avatarUrl: string;
+  /** osu! global rank at last login; null for unranked accounts. */
+  globalRank: number | null;
   isAdmin: boolean;
 }
 
