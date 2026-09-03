@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { PlatformBeatmap } from './types';
+import { Beatmap } from '../../types';
 import { Star, Heart, CheckCircle2, Music2, Upload, Play, Pause } from 'lucide-react';
 
 const statusConfig = {
@@ -9,7 +9,7 @@ const statusConfig = {
 };
 
 interface BeatmapCardPlatformProps {
-  beatmap: PlatformBeatmap;
+  beatmap: Beatmap;
   showVoteButton?: boolean;
   showSubmitButton?: boolean;
   voted?: boolean;

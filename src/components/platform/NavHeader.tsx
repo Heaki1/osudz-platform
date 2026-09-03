@@ -1,6 +1,6 @@
 import React from 'react';
-import { Phase, PlatformPage } from './types';
-import { Home, Upload, Trophy, Search, Swords, Shield, LogOut, ChevronDown, Archive } from 'lucide-react';
+import { Phase, PlatformPage } from '../../types';
+import { Home, Upload, Trophy, Search, Shield, LogOut, ChevronDown, Archive } from 'lucide-react';
 
 export interface AuthUser {
   username: string;
@@ -50,13 +50,12 @@ interface NavHeaderProps {
   page: PlatformPage;
   phase: Phase;
   onNavigate: (page: PlatformPage) => void;
-  onSwitchToGame: () => void;
   user?: AuthUser | null;
   onLogin?: () => void;
   onLogout?: () => void;
 }
 
-export function NavHeader({ page, phase, onNavigate, onSwitchToGame, user, onLogin, onLogout }: NavHeaderProps) {
+export function NavHeader({ page, phase, onNavigate, user, onLogin, onLogout }: NavHeaderProps) {
   const cfg = phaseConfig[phase];
 
   return (
@@ -160,17 +159,6 @@ export function NavHeader({ page, phase, onNavigate, onSwitchToGame, user, onLog
         >
           <Shield className="w-3.5 h-3.5" />
           Admin
-        </button>
-
-        {/* Game mode toggle */}
-        <button
-          type="button"
-          onClick={onSwitchToGame}
-          title="Switch to card game prototype"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800 text-slate-600 hover:text-slate-400 text-xs font-mono transition-colors flex-shrink-0"
-        >
-          <Swords className="w-3.5 h-3.5" />
-          Game
         </button>
       </div>
 

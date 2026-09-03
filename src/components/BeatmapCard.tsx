@@ -1,13 +1,13 @@
 import React, { useRef, useState } from 'react';
-import { BeatmapBounty, BeatmapComment } from '../types';
+import { Beatmap, BeatmapComment } from '../types';
 import {
   Star, Play, Pause, MessageSquare, Heart,
-  CheckCircle2, Sliders, Trophy, Medal, Zap, Target, Flame, Crown,
+  CheckCircle2, Trophy,
   CornerDownRight, Send, X,
 } from 'lucide-react';
 
 interface BeatmapCardProps {
-  bounty: BeatmapBounty;
+  beatmap: Beatmap;
   isPlaying: boolean;
   audioProgress: number;
   onTogglePlay: () => void;
@@ -15,43 +15,26 @@ interface BeatmapCardProps {
   onVote: () => void;
   onFavorite: () => void;
   onOpenComments: () => void;
-  onInspectCard?: () => void;
 }
-
-const difficultyColors = {
-  Bronze: { bg: 'bg-amber-900/40', border: 'border-amber-700/60', text: 'text-amber-400', badge: 'bg-amber-800/60' },
-  Silver: { bg: 'bg-slate-700/40', border: 'border-slate-500/60', text: 'text-slate-300', badge: 'bg-slate-700/60' },
-  Gold: { bg: 'bg-yellow-900/40', border: 'border-yellow-500/60', text: 'text-yellow-400', badge: 'bg-yellow-800/60' },
-  Platinum: { bg: 'bg-cyan-900/40', border: 'border-cyan-500/60', text: 'text-cyan-400', badge: 'bg-cyan-800/60' },
-};
-
-const challengeIcons: Record<string, React.ReactNode> = {
-  trophy: <Trophy className="w-4 h-4" />,
-  medal: <Medal className="w-4 h-4" />,
-  zap: <Zap className="w-4 h-4" />,
-  target: <Target className="w-4 h-4" />,
-  flame: <Flame className="w-4 h-4" />,
-  crown: <Crown className="w-4 h-4" />,
-};
 
 const ratingColors = [
   'text-rose-400', 'text-amber-400', 'text-yellow-300', 'text-emerald-400', 'text-cyan-400',
 ];
 
 export const BeatmapCard: React.FC<BeatmapCardProps> = ({
-  bounty, isPlaying, audioProgress,
-  onTogglePlay, onScrubAudio, onVote, onFavorite, onOpenComments, onInspectCard,
+  beatmap, isPlaying, audioProgress,
+  onTogglePlay, onScrubAudio, onVote, onFavorite, onOpenComments,
 }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [spinClass, setSpinClass] = useState('');
   const [showComments, setShowComments] = useState(false);
-  const [localComments, setLocalComments] = useState<BeatmapComment[]>(bounty.comments);
+  const [localComments, setLocalComments] = useState<BeatmapComment[]>(beatmap.comments ?? []);
   const [newComment, setNewComment] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const spinRef = useRef<(() => void) | null>(null);
 
-  const isHighDifficulty = bounty.difficultyRating >= 4.2;
+  const isHighDifficulty = beatmap.stars >= 4.2;
   const headerBgClass = isHighDifficulty ? 'bg-rose-500 text-white' : 'bg-amber-400 text-slate-950';
   const barFillColor = isHighDifficulty ? 'bg-rose-400' : 'bg-amber-400';
 
@@ -128,39 +111,36 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
           {/* Star Rating Banner */}
           <div className={`w-full py-1.5 px-3 flex items-center justify-between font-bold text-xs tracking-wider select-none flex-shrink-0 ${headerBgClass}`}>
             <div className="flex items-center gap-1">
-              {Array.from({ length: Math.min(5, Math.ceil(bounty.difficultyRating)) }).map((_, i) => (
+              {Array.from({ length: Math.min(5, Math.ceil(beatmap.stars)) }).map((_, i) => (
                 <Star key={i} className="w-3.5 h-3.5 fill-current stroke-current" />
               ))}
             </div>
-            <span className="font-mono font-black text-sm tracking-tight">{bounty.difficultyRating.toFixed(2)}</span>
+            <span className="font-mono font-black text-sm tracking-tight">{beatmap.stars.toFixed(2)}</span>
           </div>
 
           {/* Cover Artwork */}
           <div className="relative h-28 w-full bg-slate-900 overflow-hidden flex-shrink-0">
             <img
-              src={bounty.bannerUrl}
-              alt={bounty.title}
+              src={beatmap.coverUrl}
+              alt={beatmap.title}
               referrerPolicy="no-referrer"
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[#0f172a] via-[#0f172a]/20 to-transparent" />
-            <span className="absolute top-2.5 left-2.5 bg-slate-950/80 backdrop-blur-md text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border border-slate-700/80 text-slate-200">
-              {bounty.genre}
-            </span>
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); triggerSpin(onFavorite); }}
               aria-label="Favorite"
               className={`absolute top-2.5 right-2.5 w-7 h-7 rounded-full flex items-center justify-center backdrop-blur-md transition-colors ${
-                bounty.userFavorited
+                beatmap.isFavorited
                   ? 'bg-rose-500/20 text-rose-400 border border-rose-500/60'
                   : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-700/60'
               }`}
             >
-              <Heart className={`w-3.5 h-3.5 ${bounty.userFavorited ? 'fill-rose-500 text-rose-500' : ''}`} />
+              <Heart className={`w-3.5 h-3.5 ${beatmap.isFavorited ? 'fill-rose-500 text-rose-500' : ''}`} />
             </button>
             <div className="absolute bottom-2 right-2.5 bg-slate-950/85 backdrop-blur-md px-2 py-0.5 rounded-md border border-slate-700/80 flex items-center gap-1.5 text-[11px]">
-              <span className="font-bold text-white font-mono">{bounty.votes.toLocaleString()}</span>
+              <span className="font-bold text-white font-mono">{(beatmap.voteCount ?? 0).toLocaleString()}</span>
               <span className="text-slate-400 text-[10px]">votes</span>
             </div>
           </div>
@@ -168,15 +148,15 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
           {/* Info */}
           <div className="px-4 pt-3 flex-shrink-0">
             <h3 className="text-sm font-bold text-white tracking-tight line-clamp-1 group-hover:text-amber-400 transition-colors">
-              {bounty.title}
+              {beatmap.title}
             </h3>
-            <p className="text-[11px] text-slate-300 font-medium mt-0.5">{bounty.artist}
+            <p className="text-[11px] text-slate-300 font-medium mt-0.5">{beatmap.artist}
               <span className="text-slate-500 font-normal"> · mapped by </span>
-              <span className="text-slate-200 font-semibold">{bounty.mapper}</span>
+              <span className="text-slate-200 font-semibold">{beatmap.mapper}</span>
             </p>
             <div className="mt-1.5 mb-2">
               <span className="inline-block bg-slate-800/90 text-slate-200 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-slate-700">
-                {bounty.difficultyName}
+                {beatmap.difficultyName}
               </span>
             </div>
           </div>
@@ -197,18 +177,18 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                 <div className="flex justify-between items-center text-xs pb-1.5 border-b border-slate-800">
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-400">Length</span>
-                    <span className="text-slate-100 font-bold font-mono">{bounty.length}</span>
+                    <span className="text-slate-100 font-bold font-mono">{beatmap.length}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-400">BPM</span>
-                    <span className="text-slate-100 font-bold font-mono">{bounty.bpm}</span>
+                    <span className="text-slate-100 font-bold font-mono">{beatmap.bpm}</span>
                   </div>
                 </div>
                 {[
-                  { label: 'Circle Size', value: bounty.circleSize, max: 7 },
-                  { label: 'Approach Rate', value: bounty.approachRate, max: 10 },
-                  { label: 'Accuracy', value: bounty.accuracy, max: 10 },
-                  { label: 'HP Drain', value: bounty.hpDrain, max: 10 },
+                  { label: 'Circle Size', value: beatmap.cs ?? 0, max: 7 },
+                  { label: 'Approach Rate', value: beatmap.ar ?? 0, max: 10 },
+                  { label: 'Accuracy', value: beatmap.od ?? 0, max: 10 },
+                  { label: 'HP Drain', value: beatmap.hp ?? 0, max: 10 },
                 ].map(({ label, value, max }) => (
                   <div key={label} className="space-y-1">
                     <div className="flex justify-between text-[11px]">
@@ -248,7 +228,7 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                   />
                 </div>
                 <span className="text-[10px] text-slate-400 tabular-nums font-mono w-12 text-right">
-                  {formatTime(audioProgress, bounty.previewSeconds || 60)}
+                  {formatTime(audioProgress, beatmap.previewSeconds || 60)}
                 </span>
               </div>
             </div>
@@ -362,14 +342,14 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
               type="button"
               onClick={(e) => { e.stopPropagation(); triggerSpin(onVote); }}
               className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 active:scale-[0.98] ${
-                bounty.userVoted
+                beatmap.isVoted
                   ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
                   : 'bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold'
               }`}
             >
-              {bounty.userVoted
-                ? <><CheckCircle2 className="w-3.5 h-3.5" /><span>Voted (+{bounty.bountyRewardPoints} pts)</span></>
-                : <span>Vote (+{bounty.bountyRewardPoints} pts)</span>}
+              {beatmap.isVoted
+                ? <><CheckCircle2 className="w-3.5 h-3.5" /><span>Voted</span></>
+                : <span>Vote</span>}
             </button>
 
             <button
@@ -393,62 +373,56 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                 <span className="text-[10px] bg-slate-900 px-1.5 py-0.5 rounded-full font-bold">{localComments.length}</span>
               )}
             </button>
-
-            {onInspectCard && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onInspectCard(); }}
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition-colors"
-              >
-                <Sliders className="w-3.5 h-3.5" />
-              </button>
-            )}
           </div>
         </div>
 
         {/* ── BACK FACE ── */}
         <div className="card-face card-face-back bg-[#0f172a] border border-slate-700/80 rounded-2xl overflow-hidden shadow-lg flex flex-col text-slate-100">
           <div className={`w-full py-2 px-3 flex items-center justify-between font-bold text-xs tracking-wider select-none flex-shrink-0 ${headerBgClass}`}>
-            <span className="font-mono font-black">BOUNTY CHALLENGES</span>
+            <span className="font-mono font-black">SUBMISSION DETAILS</span>
             <Trophy className="w-4 h-4" />
           </div>
 
           <div className="relative h-16 overflow-hidden flex-shrink-0">
-            <img src={bounty.bannerUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover opacity-30" />
+            <img src={beatmap.coverUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover opacity-30" />
             <div className="absolute inset-0 bg-gradient-to-r from-[#0f172a] via-[#0f172a]/60 to-[#0f172a]" />
             <div className="absolute inset-0 p-3 flex flex-col justify-center">
-              <p className="text-sm font-black text-white line-clamp-1">{bounty.title}</p>
-              <p className="text-[11px] text-slate-400">{bounty.artist} · mapped by {bounty.mapper}</p>
+              <p className="text-sm font-black text-white line-clamp-1">{beatmap.title}</p>
+              <p className="text-[11px] text-slate-400">{beatmap.artist} · mapped by {beatmap.mapper}</p>
               <p className="text-[10px] text-amber-400 font-mono mt-0.5 font-bold">
-                ★ {bounty.difficultyRating.toFixed(2)} · {bounty.difficultyName}
+                ★ {beatmap.stars.toFixed(2)} · {beatmap.difficultyName}
               </p>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
             <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">
-              Complete challenges · Earn points
+              Challenge requirements
             </p>
-            {bounty.challenges.map((ch) => {
-              const colors = difficultyColors[ch.difficulty];
-              return (
-                <div key={ch.id} className={`rounded-xl border p-3 ${colors.bg} ${colors.border}`}>
-                  <div className="flex items-start gap-2.5">
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${colors.badge} ${colors.text}`}>
-                      {challengeIcons[ch.icon] ?? <Trophy className="w-4 h-4" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className={`text-xs font-bold ${colors.text} leading-tight`}>{ch.title}</p>
-                        <span className={`text-[10px] font-mono font-black ${colors.text} flex-shrink-0`}>+{ch.reward} pts</span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{ch.description}</p>
-                      <p className="text-[10px] text-slate-600 mt-1 font-mono">{ch.completedBy.toLocaleString()} players completed</p>
-                    </div>
-                  </div>
+
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl divide-y divide-slate-800/60">
+              {[
+                { label: 'Mod requirement', value: beatmap.modRequirement, mono: true },
+                { label: 'Challenge type', value: beatmap.challengeType, mono: false },
+                { label: 'Submitted by', value: beatmap.submittedByName, mono: false },
+                { label: 'Map status', value: beatmap.status, mono: false },
+              ].map(({ label, value, mono }) => (
+                <div key={label} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                  <span className="text-[11px] text-slate-500">{label}</span>
+                  <span
+                    className={`text-[11px] font-bold text-slate-100 text-right ${mono ? 'font-mono' : ''} ${
+                      value ? '' : 'text-slate-600'
+                    }`}
+                  >
+                    {value || '—'}
+                  </span>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+
+            {beatmap.description && (
+              <p className="text-[11px] text-slate-400 leading-snug px-1">{beatmap.description}</p>
+            )}
           </div>
 
           <div className="p-3 border-t border-slate-800 flex gap-2 flex-shrink-0">
@@ -456,21 +430,21 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
               type="button"
               onClick={(e) => { e.stopPropagation(); triggerSpin(onVote); }}
               className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 ${
-                bounty.userVoted ? 'bg-emerald-600 text-white' : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                beatmap.isVoted ? 'bg-emerald-600 text-white' : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
               }`}
             >
-              {bounty.userVoted ? <><CheckCircle2 className="w-3.5 h-3.5" /> Voted</> : `Vote · +${bounty.bountyRewardPoints} pts`}
+              {beatmap.isVoted ? <><CheckCircle2 className="w-3.5 h-3.5" /> Voted</> : 'Vote'}
             </button>
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); triggerSpin(onFavorite); }}
               className={`px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${
-                bounty.userFavorited
+                beatmap.isFavorited
                   ? 'bg-rose-500/20 border-rose-500/60 text-rose-400'
                   : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
               }`}
             >
-              <Heart className={`w-3.5 h-3.5 ${bounty.userFavorited ? 'fill-rose-500' : ''}`} />
+              <Heart className={`w-3.5 h-3.5 ${beatmap.isFavorited ? 'fill-rose-500' : ''}`} />
             </button>
           </div>
         </div>

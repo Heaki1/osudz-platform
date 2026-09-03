@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArchiveEntry } from './types';
+import { ArchiveEntry } from '../../types';
 import { archiveData } from './sampleData';
 import {
   Crown, Star, CheckCircle2, AlertCircle,

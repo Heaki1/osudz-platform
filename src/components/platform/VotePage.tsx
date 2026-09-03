@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BeatmapCard } from '../BeatmapCard';
-import { BeatmapBounty } from '../../types';
+import { Beatmap } from '../../types';
 import { AuthUser } from './NavHeader';
 import { Crown, Trophy, ChevronRight, LogIn, X } from 'lucide-react';
 
@@ -41,9 +41,9 @@ function LoginModal({ onClose, onLogin }: { onClose: () => void; onLogin?: () =>
 
 // ── VOTE STANDINGS PANEL ─────────────────────────────────────────────────────
 
-function VoteStandings({ maps, votedId }: { maps: BeatmapBounty[]; votedId: string | null }) {
-  const sorted = [...maps].sort((a, b) => b.votes - a.votes);
-  const maxVotes = sorted[0]?.votes ?? 1;
+function VoteStandings({ maps, votedId }: { maps: Beatmap[]; votedId: string | null }) {
+  const sorted = [...maps].sort((a, b) => (b.voteCount ?? 0) - (a.voteCount ?? 0));
+  const maxVotes = sorted[0]?.voteCount ?? 1;
 
   return (
     <div className="bg-[#0d1526] border border-slate-800 rounded-2xl overflow-hidden">
@@ -53,12 +53,12 @@ function VoteStandings({ maps, votedId }: { maps: BeatmapBounty[]; votedId: stri
           <h3 className="text-sm font-bold text-white">Vote Standings</h3>
         </div>
         <span className="text-[10px] text-slate-600 font-mono">
-          {maps.reduce((s, m) => s + m.votes, 0).toLocaleString()} total
+          {maps.reduce((s, m) => s + (m.voteCount ?? 0), 0).toLocaleString()} total
         </span>
       </div>
       <div className="divide-y divide-slate-800/40">
         {sorted.map((m, i) => {
-          const pct = Math.round((m.votes / maxVotes) * 100);
+          const pct = Math.round(((m.voteCount ?? 0) / maxVotes) * 100);
           const isLeader = i === 0;
           const isMyVote = m.id === votedId;
           return (
@@ -76,7 +76,7 @@ function VoteStandings({ maps, votedId }: { maps: BeatmapBounty[]; votedId: stri
                           You
                         </span>
                       )}
-                      <span className="text-[11px] font-black font-mono text-white">{m.votes.toLocaleString()}</span>
+                      <span className="text-[11px] font-black font-mono text-white">{(m.voteCount ?? 0).toLocaleString()}</span>
                     </div>
                   </div>
                   <div className="h-1.5 bg-slate-900 rounded-full overflow-hidden">
@@ -101,7 +101,7 @@ function VoteStandings({ maps, votedId }: { maps: BeatmapBounty[]; votedId: stri
 // ── VOTE PAGE ─────────────────────────────────────────────────────────────────
 
 interface VotePageProps {
-  maps: BeatmapBounty[];
+  maps: Beatmap[];
   playingId: string | null;
   audioProgress: (id: string) => number;
   onTogglePlay: (id: string) => void;
@@ -113,10 +113,10 @@ interface VotePageProps {
 }
 
 export function VotePage({ maps, playingId, audioProgress, onTogglePlay, onScrub, onVote, onFavorite, user, onLogin }: VotePageProps) {
-  const sorted = [...maps].sort((a, b) => b.votes - a.votes);
+  const sorted = [...maps].sort((a, b) => (b.voteCount ?? 0) - (a.voteCount ?? 0));
   const leader = sorted[0];
-  const totalVotes = maps.reduce((s, m) => s + m.votes, 0);
-  const userVoted = maps.find((m) => m.userVoted);
+  const totalVotes = maps.reduce((s, m) => s + (m.voteCount ?? 0), 0);
+  const votedMap = maps.find((m) => m.isVoted);
   const [showAll, setShowAll] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const visibleMaps = showAll ? sorted : sorted.slice(0, 6);
@@ -171,12 +171,12 @@ export function VotePage({ maps, playingId, audioProgress, onTogglePlay, onScrub
           </div>
         </div>
 
-        {userVoted ? (
+        {votedMap ? (
           <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-4 py-2.5">
             <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
             <div>
               <p className="text-xs font-black text-emerald-400">Vote cast</p>
-              <p className="text-[10px] text-emerald-400/60 truncate max-w-[160px]">{userVoted.title}</p>
+              <p className="text-[10px] text-emerald-400/60 truncate max-w-[160px]">{votedMap.title}</p>
             </div>
           </div>
         ) : (
@@ -198,24 +198,24 @@ export function VotePage({ maps, playingId, audioProgress, onTogglePlay, onScrub
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-            {visibleMaps.map((bounty) => {
-              const isLeader = bounty.id === leader?.id;
+            {visibleMaps.map((beatmap) => {
+              const isLeader = beatmap.id === leader?.id;
               return (
-                <div key={bounty.id} className="relative">
+                <div key={beatmap.id} className="relative">
                   {isLeader && (
                     <div className="absolute -top-3 left-4 z-10 flex items-center gap-1.5 bg-amber-400 text-slate-950 text-[10px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider shadow-lg shadow-amber-400/25">
                       <Crown className="w-3 h-3" />
-                      Leading · {bounty.votes.toLocaleString()} votes
+                      Leading · {(beatmap.voteCount ?? 0).toLocaleString()} votes
                     </div>
                   )}
                   <BeatmapCard
-                    bounty={bounty}
-                    isPlaying={playingId === bounty.id}
-                    audioProgress={audioProgress(bounty.id)}
-                    onTogglePlay={() => onTogglePlay(bounty.id)}
-                    onScrubAudio={(e) => onScrub(bounty.id, e)}
-                    onVote={() => handleVoteAttempt(bounty.id)}
-                    onFavorite={() => onFavorite(bounty.id)}
+                    beatmap={beatmap}
+                    isPlaying={playingId === beatmap.id}
+                    audioProgress={audioProgress(beatmap.id)}
+                    onTogglePlay={() => onTogglePlay(beatmap.id)}
+                    onScrubAudio={(e) => onScrub(beatmap.id, e)}
+                    onVote={() => handleVoteAttempt(beatmap.id)}
+                    onFavorite={() => onFavorite(beatmap.id)}
                     onOpenComments={() => {}}
                   />
                 </div>
@@ -239,7 +239,7 @@ export function VotePage({ maps, playingId, audioProgress, onTogglePlay, onScrub
 
         {/* Standings sidebar */}
         <aside className="hidden lg:block w-72 flex-shrink-0 sticky top-24">
-          <VoteStandings maps={maps} votedId={userVoted?.id ?? null} />
+          <VoteStandings maps={maps} votedId={votedMap?.id ?? null} />
           {!user && (
             <div className="mt-4 bg-[#0d1526] border border-slate-800 rounded-2xl px-4 py-4 text-center">
               <p className="text-xs text-slate-500 leading-relaxed">

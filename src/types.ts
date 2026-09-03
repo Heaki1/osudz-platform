@@ -1,12 +1,13 @@
-export interface BountyChallenge {
-  id: string;
-  title: string;
-  description: string;
-  reward: number;
-  icon: string;
-  difficulty: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
-  completedBy: number;
-}
+// Shared types for the osu!dz platform.
+//
+// One beatmap model (`Beatmap`) covers every surface: dashboard, submit, vote,
+// search, and archive. Field names deliberately match `ApiSubmission` in
+// src/api/client.ts so that swapping sample data for real server DTOs is a
+// rename, not a translation layer.
+
+export type Phase = 'submission' | 'voting' | 'challenge';
+export type BeatmapStatus = 'ranked' | 'loved' | 'approved';
+export type PlatformPage = 'dashboard' | 'submit' | 'vote' | 'search' | 'admin' | 'archive';
 
 export interface BeatmapComment {
   id: string;
@@ -17,54 +18,85 @@ export interface BeatmapComment {
   rating?: number;
 }
 
-export interface SubmittedBeatmap {
-  id: string;
-  url: string;
-  title?: string;
-  artist?: string;
-  mapper?: string;
-  stars?: string | number;
-  cs?: string | number;
-  ar?: string | number;
-  od?: string | number;
-  bpm?: string | number;
-  length?: string;
-  mod?: string;
-  slot?: string;
-  skill?: string;
-  cover_url?: string;
-  preview_url?: string;
-  submitted_by?: string;
-  submitted_by_name?: string;
-  type?: string;
-}
-
-export interface BeatmapBounty {
+export interface Beatmap {
+  // ── Identity + metadata ──
   id: string;
   title: string;
   artist: string;
   mapper: string;
-  genre: 'Electronic' | 'Rock' | 'Pop' | 'Classical' | 'Anime';
-  difficultyRating: number;
-  difficultyCategory: 'Easy' | 'Normal' | 'Hard' | 'Insane';
   difficultyName: string;
-  votes: number;
-  userVoted: boolean;
-  userFavorited: boolean;
-  bannerUrl: string;
-  previewDuration: string;
-  previewSeconds: number;
-  currentPlaybackTime: number;
-  isPlaying: boolean;
+  stars: number;
   bpm: number;
   length: string;
-  circleSize: number;
-  approachRate: number;
-  accuracy: number;
-  hpDrain: number;
-  bountyRewardPoints: number;
-  description: string;
-  comments: BeatmapComment[];
-  challenges: BountyChallenge[];
+  status: BeatmapStatus;
+  coverUrl: string;
   previewUrl?: string;
+
+  // ── Difficulty spec (rendered as bars on the vote card) ──
+  cs?: number;
+  ar?: number;
+  od?: number;
+  hp?: number;
+  previewSeconds?: number;
+
+  // ── Round / submission context ──
+  voteCount?: number;
+  isVoted?: boolean;
+  isFavorited?: boolean;
+  modRequirement?: string;
+  challengeType?: string;
+  submittedByName?: string;
+  description?: string;
+  comments?: BeatmapComment[];
+}
+
+export interface ChallengeScore {
+  rank: number;
+  username: string;
+  score: number;
+  accuracy: number;
+  misses: number;
+  mods: string;
+  qualified: boolean;
+  isMe?: boolean;
+}
+
+export interface ArchiveEntry {
+  round: number;
+  month: string;
+  year: number;
+  winner: {
+    title: string;
+    artist: string;
+    mapper: string;
+    stars: number;
+    bpm: number;
+    length: string;
+    status: BeatmapStatus;
+    difficultyName: string;
+    coverUrl: string;
+    previewUrl?: string;
+    mod: string;
+    challengeType: string;
+    submittedBy: string;
+    votes: number;
+    totalVotes: number;
+  };
+  challengeWinner: {
+    username: string;
+    score: number;
+    accuracy: number;
+    misses: number;
+    mods: string;
+  };
+  leaderboard: {
+    rank: number;
+    username: string;
+    score: number;
+    accuracy: number;
+    misses: number;
+    mods: string;
+    qualified: boolean;
+  }[];
+  participants: number;
 }

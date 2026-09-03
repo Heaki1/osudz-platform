@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Phase, PlatformPage } from './types';
+import { Phase, PlatformPage } from '../../types';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';

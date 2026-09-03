@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { searchBeatmaps } from './sampleData';
 import { Search, SlidersHorizontal } from 'lucide-react';
-import { BeatmapStatus } from './types';
+import { BeatmapStatus } from '../../types';
 
 export function SearchPage() {
   const [query, setQuery] = useState('');

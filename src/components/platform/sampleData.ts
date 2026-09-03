@@ -1,6 +1,6 @@
-import { PlatformBeatmap, ChallengeScore, ArchiveEntry } from './types';
+import { Beatmap, ChallengeScore, ArchiveEntry } from '../../types';
 
-export const favoriteBeatmaps: PlatformBeatmap[] = [
+export const favoriteBeatmaps: Beatmap[] = [
   {
     id: 'blue-zenith',
     title: 'Blue Zenith (Cut Ver.)',
@@ -87,7 +87,7 @@ export const favoriteBeatmaps: PlatformBeatmap[] = [
   },
 ];
 
-export const votingBeatmaps: PlatformBeatmap[] = [
+export const votingBeatmaps: Beatmap[] = [
   {
     id: 'blue-zenith',
     title: 'Blue Zenith (Cut Ver.)',
@@ -100,7 +100,14 @@ export const votingBeatmaps: PlatformBeatmap[] = [
     coverUrl: 'https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=400&h=200&fit=crop&auto=format',
     previewUrl: 'https://b.ppy.sh/preview/292301.mp3',
     difficultyName: "sanatint's Insane",
+    cs: 4.0,
+    ar: 9.5,
+    od: 9.0,
+    hp: 6.0,
+    previewSeconds: 60,
     voteCount: 47,
+    isVoted: false,
+    isFavorited: false,
     modRequirement: 'HD',
     challengeType: 'Full Combo',
     submittedByName: 'Yanis_dzx',
@@ -117,7 +124,14 @@ export const votingBeatmaps: PlatformBeatmap[] = [
     coverUrl: 'https://images.unsplash.com/photo-1611532736597-de2d4265fba3?w=400&h=200&fit=crop&auto=format',
     previewUrl: 'https://b.ppy.sh/preview/1110158.mp3',
     difficultyName: "Garden's Extra",
+    cs: 4.0,
+    ar: 9.0,
+    od: 8.5,
+    hp: 5.5,
+    previewSeconds: 60,
     voteCount: 31,
+    isVoted: false,
+    isFavorited: false,
     modRequirement: 'NM',
     challengeType: 'Best Accuracy',
     submittedByName: 'Rezki',
@@ -134,7 +148,14 @@ export const votingBeatmaps: PlatformBeatmap[] = [
     coverUrl: 'https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=400&h=200&fit=crop&auto=format',
     previewUrl: 'https://b.ppy.sh/preview/376434.mp3',
     difficultyName: "Kibbleru's Extra",
+    cs: 4.0,
+    ar: 9.0,
+    od: 8.0,
+    hp: 5.0,
+    previewSeconds: 60,
     voteCount: 22,
+    isVoted: false,
+    isFavorited: false,
     modRequirement: 'HDHR',
     challengeType: 'Lowest Miss Count',
     submittedByName: 'imed_osu',
@@ -151,7 +172,14 @@ export const votingBeatmaps: PlatformBeatmap[] = [
     coverUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=400&h=200&fit=crop&auto=format',
     previewUrl: 'https://b.ppy.sh/preview/39804.mp3',
     difficultyName: 'FOUR DIMENSIONS',
+    cs: 4.0,
+    ar: 9.6,
+    od: 9.2,
+    hp: 6.5,
+    previewSeconds: 60,
     voteCount: 18,
+    isVoted: false,
+    isFavorited: false,
     modRequirement: 'DT',
     challengeType: 'Top #1 Score',
     submittedByName: 'Karim_DZ',
@@ -168,7 +196,14 @@ export const votingBeatmaps: PlatformBeatmap[] = [
     coverUrl: 'https://images.unsplash.com/photo-1462965326201-d02e4f455804?w=400&h=200&fit=crop&auto=format',
     previewUrl: 'https://b.ppy.sh/preview/167786.mp3',
     difficultyName: "Seni's Extra",
+    cs: 3.8,
+    ar: 8.8,
+    od: 8.0,
+    hp: 5.0,
+    previewSeconds: 60,
     voteCount: 11,
+    isVoted: false,
+    isFavorited: false,
     modRequirement: 'HR',
     challengeType: 'Best Accuracy',
     submittedByName: 'helixia_dz',
@@ -302,7 +337,7 @@ export const archiveData: ArchiveEntry[] = [
   },
 ];
 
-export const searchBeatmaps: PlatformBeatmap[] = [
+export const searchBeatmaps: Beatmap[] = [
   ...favoriteBeatmaps,
   {
     id: 'ghost-rule',

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Phase } from './types';
+import { Phase } from '../../types';
 import {
   Shield, ChevronRight, CheckCircle2, Circle, Clock,
   Star, Music2, AlertCircle, Users, Settings, Zap,
