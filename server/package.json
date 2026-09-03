@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc"
+    "build": "tsc",
+    "db:check": "tsx src/scripts/check-db.ts",
+    "migrate": "tsx src/scripts/migrate.ts",
+    "migrate:status": "tsx src/scripts/migrate.ts --status"
   },
   "dependencies": {
     "cors": "^2.8.5",
