@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Phase, PlatformPage } from '../../types';
+import { CurrentRound, roundLabel, useCountdown } from '../../lib/round';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { favoriteBeatmaps, votingBeatmaps, challengeScores } from './sampleData';
 import { AuthUser } from './NavHeader';
@@ -31,61 +32,32 @@ function LoginNudge({ message, onLogin }: { message: string; onLogin?: () => voi
   );
 }
 
-// ── PHASE DEMO SWITCHER ──────────────────────────────────────────────────────
-
-function PhaseSwitcher({ phase, onChange }: { phase: Phase; onChange: (p: Phase) => void }) {
-  const phases: { key: Phase; label: string; activeClass: string }[] = [
-    { key: 'submission', label: 'Submission', activeClass: 'bg-amber-400/15 border-amber-400/40 text-amber-400'    },
-    { key: 'voting',     label: 'Voting',     activeClass: 'bg-blue-500/15 border-blue-500/40 text-blue-400'       },
-    { key: 'challenge',  label: 'Challenge',  activeClass: 'bg-purple-500/15 border-purple-500/40 text-purple-400' },
-  ];
-  return (
-    <div className="flex items-center gap-1 p-1 bg-slate-900/50 border border-slate-800 rounded-xl w-fit mb-8">
-      <span className="text-[10px] text-slate-600 font-mono px-2 select-none">DEMO PHASE:</span>
-      {phases.map(({ key, label, activeClass }) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => onChange(key)}
-          className={`px-4 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-            phase === key ? activeClass : 'border-transparent text-slate-500 hover:text-slate-300'
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ── ROUND HEADER ─────────────────────────────────────────────────────────────
 
-const roundMeta: Record<Phase, { label: string; color: string; bar: string; desc: string; countdown: string }> = {
+const roundMeta: Record<Phase, { label: string; color: string; bar: string; desc: string }> = {
   submission: {
     label: 'SUBMISSION PHASE',
     color: 'text-amber-400',
     bar: 'bg-amber-400',
     desc: 'Submit the beatmap you want as this month\'s community challenge. The community votes to decide the winner.',
-    countdown: '2d 14h 32m',
   },
   voting: {
     label: 'VOTING PHASE',
     color: 'text-blue-400',
     bar: 'bg-blue-500',
     desc: 'Cast your vote for the beatmap you want as the monthly challenge. Algerian players get one vote each.',
-    countdown: '18h 04m',
   },
   challenge: {
     label: 'CHALLENGE PHASE',
     color: 'text-purple-400',
     bar: 'bg-purple-500',
     desc: 'The winning beatmap has been chosen. Submit your best score to qualify and compete for the monthly bounty.',
-    countdown: '12d 7h',
   },
 };
 
-function RoundHeader({ phase }: { phase: Phase }) {
-  const cfg = roundMeta[phase];
+function RoundHeader({ round, countdown }: { round: CurrentRound; countdown: string }) {
+  const cfg = roundMeta[round.phase];
+
   return (
     <div className="mb-10">
       <div className="flex items-start justify-between gap-6 flex-wrap">
@@ -95,13 +67,13 @@ function RoundHeader({ phase }: { phase: Phase }) {
               {cfg.label}
             </span>
             <span className="text-slate-700">·</span>
-            <span className="text-[10px] text-slate-500 font-mono">Round 1 · August 2026</span>
+            <span className="text-[10px] text-slate-500 font-mono">{roundLabel(round)}</span>
           </div>
           <p className="text-sm text-slate-400 max-w-2xl leading-relaxed">{cfg.desc}</p>
         </div>
         <div className="flex-shrink-0">
           <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 text-right">Ends in</div>
-          <div className={`text-2xl font-black font-mono ${cfg.color}`}>{cfg.countdown}</div>
+          <div className={`text-2xl font-black font-mono ${cfg.color}`}>{countdown}</div>
         </div>
       </div>
       <div className={`mt-5 h-px w-full ${cfg.bar} opacity-20 rounded-full`} />
@@ -111,12 +83,12 @@ function RoundHeader({ phase }: { phase: Phase }) {
 
 // ── CHALLENGE LEADERBOARD ────────────────────────────────────────────────────
 
-function ChallengeLeaderboard() {
+function ChallengeLeaderboard({ roundNumber }: { roundNumber: number }) {
   return (
     <div className="bg-[#0d1526] border border-slate-800/80 rounded-2xl overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-800/60 flex items-center justify-between">
         <h3 className="text-sm font-bold text-white">Challenge Leaderboard</h3>
-        <span className="text-[10px] text-slate-600 font-mono uppercase tracking-wider">Algeria · Round 1</span>
+        <span className="text-[10px] text-slate-600 font-mono uppercase tracking-wider">Algeria · Round {roundNumber}</span>
       </div>
 
       {/* Header row */}
@@ -212,16 +184,33 @@ function ChallengeLeaderboard() {
 // ── DASHBOARD PAGE ───────────────────────────────────────────────────────────
 
 interface DashboardPageProps {
-  phase: Phase;
-  onPhaseChange: (phase: Phase) => void;
+  round: CurrentRound | null;
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
 }
 
-export function DashboardPage({ phase, onPhaseChange, onNavigate, user, onLogin }: DashboardPageProps) {
+function NoActiveRound() {
+  return (
+    <div className="bg-[#0d1526] border border-slate-800 rounded-2xl px-8 py-16 text-center">
+      <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto mb-5">
+        <Clock className="w-7 h-7 text-slate-700" />
+      </div>
+      <p className="text-white font-bold mb-1">No round is running</p>
+      <p className="text-sm text-slate-500 max-w-md mx-auto">
+        The next monthly round has not been opened yet. Submissions, voting, and the challenge
+        leaderboard all appear here once it starts.
+      </p>
+    </div>
+  );
+}
+
+export function DashboardPage({ round, onNavigate, user, onLogin }: DashboardPageProps) {
   const [userVote, setUserVote] = useState<string | null>(null);
   const [favorites, setFavorites] = useState(favoriteBeatmaps);
+  // One ticking countdown for the page, called before the early return below so
+  // the hook order never changes. Both the header and the challenge hero use it.
+  const countdown = useCountdown(round?.endsAt);
 
   const toggleFavorite = (id: string) => {
     setFavorites((prev) => prev.map((b) => (b.id === id ? { ...b, isFavorited: !b.isFavorited } : b)));
@@ -229,10 +218,19 @@ export function DashboardPage({ phase, onPhaseChange, onNavigate, user, onLogin 
 
   const leadingMap = votingBeatmaps[0];
 
+  if (!round) {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-8 pb-16">
+        <NoActiveRound />
+      </div>
+    );
+  }
+
+  const phase = round.phase;
+
   return (
     <div className="max-w-7xl mx-auto px-6 py-8 pb-16">
-      <PhaseSwitcher phase={phase} onChange={onPhaseChange} />
-      <RoundHeader phase={phase} />
+      <RoundHeader round={round} countdown={countdown} />
 
       {/* ── SUBMISSION PHASE ──────────────────────────────────────────── */}
       {phase === 'submission' && (
@@ -394,7 +392,7 @@ export function DashboardPage({ phase, onPhaseChange, onNavigate, user, onLogin 
           <section>
             <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-1">Round 1 · August 2026</p>
+                <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-1">{roundLabel(round)}</p>
                 <h2 className="text-xl font-black text-white">All Submitted Beatmaps</h2>
               </div>
               <span className="text-xs text-slate-600 font-mono">{votingBeatmaps.length} beatmaps</span>
@@ -433,7 +431,7 @@ export function DashboardPage({ phase, onPhaseChange, onNavigate, user, onLogin 
                 <div className="flex items-center gap-2.5 mb-4">
                   <Crown className="w-5 h-5 text-amber-400" />
                   <span className="text-[10px] font-black tracking-widest text-amber-400 uppercase font-mono">
-                    Monthly Challenge · Round 1 · August 2026
+                    Monthly Challenge · {roundLabel(round)}
                   </span>
                 </div>
                 <h2 className="text-3xl font-black text-white mb-1 tracking-tight">{leadingMap.title}</h2>
@@ -466,11 +464,11 @@ export function DashboardPage({ phase, onPhaseChange, onNavigate, user, onLogin 
                     <Clock className="w-3.5 h-3.5 text-slate-500" />
                     <span className="text-[10px] text-slate-500 uppercase tracking-wider">Challenge ends in</span>
                   </div>
-                  <div className="text-3xl font-black font-mono text-purple-400">12d 07h</div>
+                  <div className="text-3xl font-black font-mono text-purple-400">{countdown}</div>
                 </div>
                 <div className="bg-amber-400/10 border border-amber-400/25 rounded-2xl px-6 py-4 text-right">
                   <p className="text-[10px] text-amber-400/60 uppercase tracking-wider font-bold mb-1">Monthly Bounty</p>
-                  <p className="text-sm font-black text-amber-400">1 Month osu!supporter</p>
+                  <p className="text-sm font-black text-amber-400">{round.reward || 'To be announced'}</p>
                 </div>
               </div>
             </div>
@@ -514,7 +512,7 @@ export function DashboardPage({ phase, onPhaseChange, onNavigate, user, onLogin 
 
             {/* Leaderboard */}
             <div className="lg:col-span-2">
-              <ChallengeLeaderboard />
+              <ChallengeLeaderboard roundNumber={round.roundNumber} />
             </div>
           </div>
         </div>

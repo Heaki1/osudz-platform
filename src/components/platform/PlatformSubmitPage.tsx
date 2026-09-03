@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Phase, PlatformPage } from '../../types';
+import { PlatformPage } from '../../types';
+import { CurrentRound, roundLabel } from '../../lib/round';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';
@@ -421,20 +422,20 @@ function LoginGate({ onLogin }: { onLogin?: () => void }) {
 type SubmitTab = 'url' | 'favorites';
 
 interface PlatformSubmitPageProps {
-  phase: Phase;
+  round: CurrentRound | null;
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
 }
 
-export function PlatformSubmitPage({ phase, onNavigate, user, onLogin }: PlatformSubmitPageProps) {
+export function PlatformSubmitPage({ round, onNavigate, user, onLogin }: PlatformSubmitPageProps) {
   const [tab, setTab] = useState<SubmitTab>('url');
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 pb-16">
       {/* Header */}
       <div className="mb-8">
-        <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-1">Round 1 · August 2026</p>
+        <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-1">{roundLabel(round)}</p>
         <h1 className="text-2xl font-black text-white mb-2 tracking-tight">Submit a Beatmap</h1>
         <p className="text-sm text-slate-400">
           Propose a beatmap for this month's community vote. The winner becomes the monthly challenge.
@@ -443,7 +444,7 @@ export function PlatformSubmitPage({ phase, onNavigate, user, onLogin }: Platfor
 
       {!user ? (
         <LoginGate onLogin={onLogin} />
-      ) : phase !== 'submission' ? (
+      ) : round?.phase !== 'submission' ? (
         <SubmissionClosed onNavigate={onNavigate} />
       ) : (
         <>

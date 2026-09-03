@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { Phase } from '../../types';
+import { api } from '../../api/client';
+import { CurrentRound, formatDeadline, roundLabel, useCountdown } from '../../lib/round';
+import { AuthUser } from './NavHeader';
 import {
   Shield, ChevronRight, CheckCircle2, Circle, Clock,
   Star, Music2, AlertCircle, Users, Settings, Zap,
@@ -41,91 +44,231 @@ const PHASES: { key: Phase; label: string; color: string }[] = [
   { key: 'challenge',  label: 'Challenge',  color: 'text-purple-400' },
 ];
 
-function RoundControl({ phase, onPhaseChange }: { phase: Phase; onPhaseChange: (p: Phase) => void }) {
-  const [subDays, setSubDays]  = useState('7');
-  const [voteDays, setVoteDays] = useState('3');
-  const [chalDays, setChalDays] = useState('21');
-
-  const phaseIdx = PHASES.findIndex((p) => p.key === phase);
-
-  const nextActions: Record<Phase, { label: string; next: Phase | null; color: string }> = {
-    submission: { label: 'Close Submissions & Start Voting', next: 'voting', color: 'bg-blue-500 hover:bg-blue-400' },
-    voting:     { label: 'Close Voting & Start Challenge',   next: 'challenge', color: 'bg-purple-500 hover:bg-purple-400' },
-    challenge:  { label: 'Archive Round & Start New Submission', next: 'submission', color: 'bg-amber-400 hover:bg-amber-300 text-slate-950' },
-  };
-
-  const action = nextActions[phase];
-
+function Banner({ tone, text, onDismiss }: { tone: 'error' | 'ok'; text: string; onDismiss: () => void }) {
+  const style = tone === 'error'
+    ? 'bg-rose-500/10 border-rose-500/25 text-rose-300'
+    : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300';
   return (
-    <div className="space-y-5">
-      <Section title="Phase Timeline" description="Advance the round through its three phases.">
-        {/* Phase progress */}
-        <div className="flex items-center gap-0">
-          {PHASES.map((p, i) => (
-            <React.Fragment key={p.key}>
-              <div className={`flex flex-col items-center gap-1.5 flex-1 ${i <= phaseIdx ? '' : 'opacity-40'}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
-                  i < phaseIdx  ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' :
-                  i === phaseIdx ? 'bg-amber-400/20 border-amber-400 text-amber-400' :
-                  'bg-slate-900 border-slate-700 text-slate-600'
-                }`}>
-                  {i < phaseIdx ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-                </div>
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                  i === phaseIdx ? p.color : i < phaseIdx ? 'text-emerald-400' : 'text-slate-600'
-                }`}>{p.label}</span>
-              </div>
-              {i < PHASES.length - 1 && (
-                <div className={`h-px flex-1 mb-5 transition-colors ${i < phaseIdx ? 'bg-emerald-500/40' : 'bg-slate-800'}`} />
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-
-        {/* Action button */}
-        <button
-          type="button"
-          onClick={() => action.next && onPhaseChange(action.next)}
-          className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm transition-all ${action.color} text-white`}
-        >
-          <ChevronRight className="w-4 h-4" />
-          {action.label}
-        </button>
-        <p className="text-[11px] text-slate-600 text-center">
-          This change is immediate and visible to all users. There is no confirmation.
-        </p>
-      </Section>
-
-      <Section title="Phase Durations" description="Set the scheduled length of each phase in days.">
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: 'Submission', val: subDays, set: setSubDays },
-            { label: 'Voting',     val: voteDays, set: setVoteDays },
-            { label: 'Challenge',  val: chalDays, set: setChalDays },
-          ].map(({ label, val, set }) => (
-            <div key={label}>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">{label} (days)</p>
-              <input
-                type="number"
-                min="1"
-                max="60"
-                value={val}
-                onChange={(e) => set(e.target.value)}
-                className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm font-mono text-white focus:outline-none transition-colors"
-              />
-            </div>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="px-5 py-2 bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 text-xs font-bold rounded-xl transition-all"
-        >
-          Save Durations
-        </button>
-      </Section>
+    <div className={`flex items-start gap-2.5 border rounded-xl px-4 py-3 ${style}`}>
+      {tone === 'error'
+        ? <AlertCircle className="w-4 h-4 flex-shrink-0 mt-px" />
+        : <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-px" />}
+      <p className="text-xs flex-1">{text}</p>
+      <button type="button" onClick={onDismiss} className="opacity-60 hover:opacity-100 transition-opacity flex-shrink-0">
+        <X className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
+
+function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; onRoundChange: () => void | Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [subDays, setSubDays]  = useState('7');
+  const [voteDays, setVoteDays] = useState('3');
+  const [chalDays, setChalDays] = useState('21');
+  const [month, setMonth] = useState('');
+  const [year, setYear] = useState('');
+  const [reward, setReward] = useState('');
+  const countdown = useCountdown(round?.endsAt);
+
+  const describe = (result: { status: number; error: string }) =>
+    result.status === 0 ? result.error : `${result.error} (HTTP ${result.status})`;
+
+  // Blank fields are omitted so the server applies its own defaults (current UTC
+  // month and year) rather than being sent empty strings.
+  const newRoundBody = () => ({
+    month: month.trim() || undefined,
+    year: year.trim() ? Number(year) : undefined,
+    reward: reward.trim() || undefined,
+    submissionDays: Number(subDays),
+    votingDays: Number(voteDays),
+    challengeDays: Number(chalDays),
+  });
+
+  const advance = async (next: Phase) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    const result = await api.admin.setPhase(next);
+    if (result.ok) setNotice(`Round ${result.data.round.roundNumber} is now in the ${next} phase.`);
+    else setError(describe(result));
+    await onRoundChange();
+    setBusy(false);
+  };
+
+  // Ending a round and opening the next are two writes: rounds_single_open means
+  // one row cannot be both ended and open. If the second call fails the round is
+  // closed with nothing open, which the "Open a Round" form below recovers.
+  const archiveAndOpenNext = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    const ended = await api.admin.setPhase('ended');
+    if (!ended.ok) {
+      setError(`Could not end the round: ${describe(ended)}`);
+      await onRoundChange();
+      setBusy(false);
+      return;
+    }
+    const created = await api.admin.createRound(newRoundBody());
+    if (created.ok) setNotice(`Round ${created.data.roundNumber} opened in the submission phase.`);
+    else setError(`Round ended, but opening the next one failed: ${describe(created)}`);
+    await onRoundChange();
+    setBusy(false);
+  };
+
+  const openRound = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    const created = await api.admin.createRound(newRoundBody());
+    if (created.ok) setNotice(`Round ${created.data.roundNumber} opened in the submission phase.`);
+    else setError(describe(created));
+    await onRoundChange();
+    setBusy(false);
+  };
+
+  const nextActions: Record<Phase, { label: string; color: string; run: () => Promise<void> }> = {
+    submission: { label: 'Close Submissions & Start Voting', color: 'bg-blue-500 hover:bg-blue-400 text-white',       run: () => advance('voting') },
+    voting:     { label: 'Close Voting & Start Challenge',   color: 'bg-purple-500 hover:bg-purple-400 text-white',   run: () => advance('challenge') },
+    challenge:  { label: 'Archive Round & Open the Next',    color: 'bg-amber-400 hover:bg-amber-300 text-slate-950', run: archiveAndOpenNext },
+  };
+
+  const durationInputs = (
+    <div className="grid grid-cols-3 gap-4">
+      {[
+        { label: 'Submission', val: subDays,  set: setSubDays },
+        { label: 'Voting',     val: voteDays, set: setVoteDays },
+        { label: 'Challenge',  val: chalDays, set: setChalDays },
+      ].map(({ label, val, set }) => (
+        <div key={label}>
+          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">{label} (days)</p>
+          <input
+            type="number"
+            min="1"
+            max="365"
+            value={val}
+            onChange={(e) => set(e.target.value)}
+            className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm font-mono text-white focus:outline-none transition-colors"
+          />
+        </div>
+      ))}
+    </div>
+  );
+
+  const phaseIdx = round ? PHASES.findIndex((p) => p.key === round.phase) : -1;
+
+  return (
+    <div className="space-y-5">
+      {error  && <Banner tone="error" text={error}  onDismiss={() => setError(null)} />}
+      {notice && <Banner tone="ok"    text={notice} onDismiss={() => setNotice(null)} />}
+
+      {round ? (
+        <>
+          <Section title="Phase Timeline" description={`${roundLabel(round)} — this phase ends in ${countdown}.`}>
+            {/* Phase progress */}
+            <div className="flex items-center gap-0">
+              {PHASES.map((p, i) => (
+                <React.Fragment key={p.key}>
+                  <div className={`flex flex-col items-center gap-1.5 flex-1 ${i <= phaseIdx ? '' : 'opacity-40'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
+                      i < phaseIdx  ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' :
+                      i === phaseIdx ? 'bg-amber-400/20 border-amber-400 text-amber-400' :
+                      'bg-slate-900 border-slate-700 text-slate-600'
+                    }`}>
+                      {i < phaseIdx ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+                    </div>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                      i === phaseIdx ? p.color : i < phaseIdx ? 'text-emerald-400' : 'text-slate-600'
+                    }`}>{p.label}</span>
+                  </div>
+                  {i < PHASES.length - 1 && (
+                    <div className={`h-px flex-1 mb-5 transition-colors ${i < phaseIdx ? 'bg-emerald-500/40' : 'bg-slate-800'}`} />
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+
+            {/* Action button */}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { void nextActions[round.phase].run(); }}
+              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${nextActions[round.phase].color}`}
+            >
+              <ChevronRight className="w-4 h-4" />
+              {busy ? 'Working…' : nextActions[round.phase].label}
+            </button>
+            <p className="text-[11px] text-slate-600 text-center">
+              This change is immediate and visible to all users. There is no confirmation.
+            </p>
+          </Section>
+
+          <Section
+            title="Schedule"
+            description="Fixed when the round was opened. Advancing a phase early does not move the later deadlines."
+          >
+            <div className="space-y-2">
+              {PHASES.map(({ key, label }) => (
+                <div key={key} className="flex items-center justify-between py-2 border-b border-slate-800/60 last:border-0">
+                  <span className={`text-xs font-bold ${key === round.phase ? 'text-amber-400' : 'text-slate-400'}`}>
+                    {label} ends
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-500">{formatDeadline(round.schedule[key])}</span>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Next Round" description="Durations applied when this round is archived and the next one opens.">
+            {durationInputs}
+          </Section>
+        </>
+      ) : (
+        <Section
+          title="Open a Round"
+          description="Nothing is running. Submissions, voting and the challenge all key off the open round, so the platform stays idle until one exists."
+        >
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: 'Month',  val: month,  set: setMonth,  hint: 'current UTC month' },
+              { label: 'Year',   val: year,   set: setYear,   hint: 'current year' },
+              { label: 'Reward', val: reward, set: setReward, hint: '1 Month osu!supporter' },
+            ].map(({ label, val, set, hint }) => (
+              <div key={label}>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">{label}</p>
+                <input
+                  type="text"
+                  value={val}
+                  placeholder={hint}
+                  onChange={(e) => set(e.target.value)}
+                  className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none transition-colors"
+                />
+              </div>
+            ))}
+          </div>
+          {durationInputs}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => { void openRound(); }}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm bg-amber-400 hover:bg-amber-300 text-slate-950 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-4 h-4" />
+            {busy ? 'Opening…' : 'Open Round'}
+          </button>
+          <p className="text-[11px] text-slate-600">
+            The durations become absolute deadlines that cascade — each phase is scheduled to start
+            when the previous one closes. Blank month and year default to the current UTC month.
+          </p>
+        </Section>
+      )}
+    </div>
+  );
+}
+
 
 // ── ELIGIBILITY ───────────────────────────────────────────────────────────────
 
@@ -550,12 +693,46 @@ function ConfigTab() {
 // ── ADMIN DASHBOARD ───────────────────────────────────────────────────────────
 
 interface AdminDashboardProps {
-  phase: Phase;
-  onPhaseChange: (p: Phase) => void;
+  round: CurrentRound | null;
+  user: AuthUser | null;
+  onRoundChange: () => void | Promise<void>;
+  onLogin?: () => void;
 }
 
-export function AdminDashboard({ phase, onPhaseChange }: AdminDashboardProps) {
+/**
+ * Shown instead of the dashboard to anyone who is not an admin. The nav button is
+ * already hidden for them, so this is only reachable directly — but the check
+ * belongs here too, and the endpoints behind it enforce the real gate.
+ */
+function AdminLocked({ user, onLogin }: { user: AuthUser | null; onLogin?: () => void }) {
+  return (
+    <div className="max-w-md mx-auto px-6 py-24 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/25 flex items-center justify-center mx-auto mb-5">
+        <Shield className="w-6 h-6 text-rose-400" />
+      </div>
+      <h1 className="text-lg font-black text-white mb-2">Admin access required</h1>
+      <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+        {user
+          ? `${user.username} is not an admin on this instance. Admin accounts are listed in ADMIN_OSU_IDS on the server.`
+          : 'Sign in with an osu! account that has admin access.'}
+      </p>
+      {!user && (
+        <button
+          type="button"
+          onClick={onLogin}
+          className="px-6 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm rounded-xl transition-all"
+        >
+          Login with osu!
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function AdminDashboard({ round, user, onRoundChange, onLogin }: AdminDashboardProps) {
   const [tab, setTab] = useState<AdminTab>('round');
+
+  if (!user?.isAdmin) return <AdminLocked user={user} onLogin={onLogin} />;
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 pb-16">
@@ -571,7 +748,7 @@ export function AdminDashboard({ phase, onPhaseChange }: AdminDashboardProps) {
         <div className="ml-auto flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-1.5">
           <Music2 className="w-3.5 h-3.5 text-rose-400" />
           <span className="text-xs font-bold text-rose-400 uppercase tracking-wider">
-            {phase === 'submission' ? 'Submission' : phase === 'voting' ? 'Voting' : 'Challenge'} Phase Active
+            {round ? `${round.phase} Phase Active` : 'No active round'}
           </span>
         </div>
       </div>
@@ -600,7 +777,15 @@ export function AdminDashboard({ phase, onPhaseChange }: AdminDashboardProps) {
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          {tab === 'round'       && <RoundControl phase={phase} onPhaseChange={onPhaseChange} />}
+          {tab !== 'round' && (
+            <div className="mb-5 flex items-start gap-2.5 bg-amber-400/8 border border-amber-400/20 rounded-xl px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-px" />
+              <p className="text-xs text-amber-400/80">
+                This tab is UI only — nothing here is saved. Round Control is the one wired tab.
+              </p>
+            </div>
+          )}
+          {tab === 'round'       && <RoundControl round={round} onRoundChange={onRoundChange} />}
           {tab === 'eligibility' && <EligibilityTab />}
           {tab === 'rules'       && <BeatmapRulesTab />}
           {tab === 'challenge'   && <ChallengeTab />}

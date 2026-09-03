@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BeatmapCard } from '../BeatmapCard';
 import { Beatmap } from '../../types';
+import { CurrentRound, roundLabel, useCountdown } from '../../lib/round';
 import { AuthUser } from './NavHeader';
 import { Crown, Trophy, ChevronRight, LogIn, X } from 'lucide-react';
 
@@ -102,6 +103,7 @@ function VoteStandings({ maps, votedId }: { maps: Beatmap[]; votedId: string | n
 
 interface VotePageProps {
   maps: Beatmap[];
+  round: CurrentRound | null;
   playingId: string | null;
   audioProgress: (id: string) => number;
   onTogglePlay: (id: string) => void;
@@ -112,13 +114,14 @@ interface VotePageProps {
   onLogin?: () => void;
 }
 
-export function VotePage({ maps, playingId, audioProgress, onTogglePlay, onScrub, onVote, onFavorite, user, onLogin }: VotePageProps) {
+export function VotePage({ maps, round, playingId, audioProgress, onTogglePlay, onScrub, onVote, onFavorite, user, onLogin }: VotePageProps) {
   const sorted = [...maps].sort((a, b) => (b.voteCount ?? 0) - (a.voteCount ?? 0));
   const leader = sorted[0];
   const totalVotes = maps.reduce((s, m) => s + (m.voteCount ?? 0), 0);
   const votedMap = maps.find((m) => m.isVoted);
   const [showAll, setShowAll] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const countdown = useCountdown(round?.endsAt);
   const visibleMaps = showAll ? sorted : sorted.slice(0, 6);
 
   const handleVoteAttempt = (id: string) => {
@@ -139,9 +142,9 @@ export function VotePage({ maps, playingId, audioProgress, onTogglePlay, onScrub
         <div className="flex items-center gap-3 mb-3 flex-wrap">
           <span className="text-[10px] font-black tracking-widest text-blue-400 font-mono uppercase">Voting Phase</span>
           <span className="text-slate-700">·</span>
-          <span className="text-[10px] text-slate-500 font-mono">Round 1 · August 2026</span>
+          <span className="text-[10px] text-slate-500 font-mono">{roundLabel(round)}</span>
           <span className="text-slate-700">·</span>
-          <span className="text-[10px] text-slate-500 font-mono">Ends in 18h 04m</span>
+          <span className="text-[10px] text-slate-500 font-mono">Ends in {countdown}</span>
         </div>
         <h1 className="text-2xl font-black text-white mb-2 tracking-tight">Vote for the Monthly Challenge</h1>
         <p className="text-sm text-slate-400 max-w-2xl">

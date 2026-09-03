@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { NavHeader, AuthUser } from './components/platform/NavHeader';
 import { DashboardPage } from './components/platform/DashboardPage';
 import { VotePage } from './components/platform/VotePage';
@@ -8,6 +8,7 @@ import { PlatformSubmitPage } from './components/platform/PlatformSubmitPage';
 import { ArchivePage } from './components/platform/ArchivePage';
 import { votingBeatmaps } from './components/platform/sampleData';
 import { api, ApiUser } from './api/client';
+import { CurrentRound, toCurrentRound } from './lib/round';
 import { Beatmap, Phase, PlatformPage } from './types';
 
 type PlayState = { id: string; progress: number; audio?: HTMLAudioElement };
@@ -16,15 +17,25 @@ const toAuthUser = (u: ApiUser): AuthUser => ({
   username: u.username,
   rank: u.globalRank,
   country: u.country,
+  isAdmin: u.isAdmin,
 });
 
 export default function App() {
   const [platformPage, setPlatformPage] = useState<PlatformPage>('dashboard');
-  const [platformPhase, setPlatformPhase] = useState<Phase>('submission');
   const [platformUser, setPlatformUser] = useState<AuthUser | null>(null);
+  const [round, setRound] = useState<CurrentRound | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [maps, setMaps] = useState<Beatmap[]>(votingBeatmaps);
   const [playState, setPlayState] = useState<PlayState | null>(null);
+
+  // The round is the single source of the phase. With no round open — or with the
+  // API down — the app falls back to 'submission' for styling only; the pages key
+  // their actual behaviour off `round` being null.
+  const phase: Phase = round?.phase ?? 'submission';
+
+  const refreshRound = useCallback(async () => {
+    setRound(toCurrentRound(await api.rounds.current()));
+  }, []);
 
   // Restore the session on load. api.auth.me() resolves to null both when signed
   // out and when the API is unreachable, so a backend that is down reads as
@@ -34,13 +45,15 @@ export default function App() {
       if (user) setPlatformUser(toAuthUser(user));
     });
 
+    void refreshRound();
+
     // The OAuth callback redirects here with ?auth=failed&reason=… on failure.
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'failed') {
       setAuthError(params.get('reason') ?? 'unknown');
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, []);
+  }, [refreshRound]);
 
   const handleLogin = () => {
     window.location.href = api.auth.loginUrl();
@@ -49,6 +62,8 @@ export default function App() {
   const handleLogout = async () => {
     await api.auth.logout();
     setPlatformUser(null);
+    // Leaving the admin page on logout, so a stale admin view cannot linger.
+    setPlatformPage((page) => (page === 'admin' ? 'dashboard' : page));
   };
 
   const handleTogglePlay = (id: string) => {
@@ -102,7 +117,8 @@ export default function App() {
     <div className="min-h-full bg-[#060c18] text-slate-100">
       <NavHeader
         page={platformPage}
-        phase={platformPhase}
+        phase={phase}
+        round={round}
         onNavigate={setPlatformPage}
         user={platformUser}
         onLogin={handleLogin}
@@ -129,8 +145,7 @@ export default function App() {
       <main>
         {platformPage === 'dashboard' && (
           <DashboardPage
-            phase={platformPhase}
-            onPhaseChange={setPlatformPhase}
+            round={round}
             onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}
@@ -139,6 +154,7 @@ export default function App() {
         {platformPage === 'vote' && (
           <VotePage
             maps={maps}
+            round={round}
             playingId={playState?.id ?? null}
             audioProgress={(id) => (playState?.id === id ? playState.progress : 0)}
             onTogglePlay={handleTogglePlay}
@@ -152,13 +168,20 @@ export default function App() {
         {platformPage === 'search' && <SearchPage />}
         {platformPage === 'submit' && (
           <PlatformSubmitPage
-            phase={platformPhase}
+            round={round}
             onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}
           />
         )}
-        {platformPage === 'admin'   && <AdminDashboard phase={platformPhase} onPhaseChange={setPlatformPhase} />}
+        {platformPage === 'admin' && (
+          <AdminDashboard
+            round={round}
+            user={platformUser}
+            onRoundChange={refreshRound}
+            onLogin={handleLogin}
+          />
+        )}
         {platformPage === 'archive' && <ArchivePage />}
       </main>
     </div>

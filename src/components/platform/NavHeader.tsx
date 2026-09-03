@@ -1,17 +1,20 @@
 import React from 'react';
 import { Phase, PlatformPage } from '../../types';
+import { CurrentRound, useCountdown } from '../../lib/round';
 import { Home, Upload, Trophy, Search, Shield, LogOut, ChevronDown, Archive } from 'lucide-react';
 
 export interface AuthUser {
   username: string;
   rank: number | null;
   country: string;
+  /** Mirrors ApiUser.isAdmin, derived server-side from ADMIN_OSU_IDS. */
+  isAdmin: boolean;
 }
 
 // osu! reports no global_rank for unranked or inactive accounts.
 const formatRank = (rank: number | null) => (rank === null ? 'unranked' : `#${rank.toLocaleString()}`);
 
-const phaseConfig: Record<Phase, { label: string; color: string; bar: string; badgeBg: string; badgeBorder: string; dot: string; countdown: string }> = {
+const phaseConfig: Record<Phase, { label: string; color: string; bar: string; badgeBg: string; badgeBorder: string; dot: string }> = {
   submission: {
     label: 'SUBMISSION PHASE',
     color: 'text-amber-400',
@@ -19,7 +22,6 @@ const phaseConfig: Record<Phase, { label: string; color: string; bar: string; ba
     badgeBg: 'bg-amber-400/10',
     badgeBorder: 'border-amber-400/25',
     dot: 'bg-amber-400',
-    countdown: '2d 14h',
   },
   voting: {
     label: 'VOTING PHASE',
@@ -28,7 +30,6 @@ const phaseConfig: Record<Phase, { label: string; color: string; bar: string; ba
     badgeBg: 'bg-blue-500/10',
     badgeBorder: 'border-blue-500/25',
     dot: 'bg-blue-400',
-    countdown: '18h',
   },
   challenge: {
     label: 'CHALLENGE PHASE',
@@ -37,7 +38,6 @@ const phaseConfig: Record<Phase, { label: string; color: string; bar: string; ba
     badgeBg: 'bg-purple-500/10',
     badgeBorder: 'border-purple-500/25',
     dot: 'bg-purple-400',
-    countdown: '12d 7h',
   },
 };
 
@@ -52,14 +52,16 @@ const navItems: { key: PlatformPage; label: string; icon: React.ReactNode }[] = 
 interface NavHeaderProps {
   page: PlatformPage;
   phase: Phase;
+  round: CurrentRound | null;
   onNavigate: (page: PlatformPage) => void;
   user?: AuthUser | null;
   onLogin?: () => void;
   onLogout?: () => void;
 }
 
-export function NavHeader({ page, phase, onNavigate, user, onLogin, onLogout }: NavHeaderProps) {
+export function NavHeader({ page, phase, round, onNavigate, user, onLogin, onLogout }: NavHeaderProps) {
   const cfg = phaseConfig[phase];
+  const countdown = useCountdown(round?.endsAt);
 
   return (
     <header className="sticky top-0 z-50 bg-[#060c18]/95 backdrop-blur-md border-b border-slate-800/70">
@@ -97,15 +99,24 @@ export function NavHeader({ page, phase, onNavigate, user, onLogin, onLogout }: 
 
         <div className="flex-1" />
 
-        {/* Phase badge */}
-        <div className={`hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-full border ${cfg.badgeBorder} ${cfg.badgeBg}`}>
-          <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot} animate-pulse`} />
-          <span className={`text-[10px] font-black tracking-widest uppercase font-mono ${cfg.color}`}>
-            {cfg.label}
-          </span>
-          <span className="text-slate-600">·</span>
-          <span className="text-[10px] text-slate-400 font-mono">Ends in {cfg.countdown}</span>
-        </div>
+        {/* Phase badge — driven by the round; without one there is nothing to count down to. */}
+        {round ? (
+          <div className={`hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-full border ${cfg.badgeBorder} ${cfg.badgeBg}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot} animate-pulse`} />
+            <span className={`text-[10px] font-black tracking-widest uppercase font-mono ${cfg.color}`}>
+              {cfg.label}
+            </span>
+            <span className="text-slate-600">·</span>
+            <span className="text-[10px] text-slate-400 font-mono">Ends in {countdown}</span>
+          </div>
+        ) : (
+          <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-full border border-slate-700 bg-slate-800/40">
+            <div className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+            <span className="text-[10px] font-black tracking-widest uppercase font-mono text-slate-500">
+              No active round
+            </span>
+          </div>
+        )}
 
         {/* Auth */}
         {user ? (
@@ -149,24 +160,27 @@ export function NavHeader({ page, phase, onNavigate, user, onLogin, onLogout }: 
           </button>
         )}
 
-        {/* Admin link */}
-        <button
-          type="button"
-          onClick={() => onNavigate('admin')}
-          title="Admin Dashboard"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all flex-shrink-0 ${
-            page === 'admin'
-              ? 'bg-rose-500/15 border-rose-500/40 text-rose-400'
-              : 'bg-slate-900/60 border-slate-800 text-slate-600 hover:text-slate-400'
-          }`}
-        >
-          <Shield className="w-3.5 h-3.5" />
-          Admin
-        </button>
+        {/* Admin link — hidden for everyone else. Convenience only; the real gate
+            is requireAdmin on every /api/admin route. */}
+        {user?.isAdmin && (
+          <button
+            type="button"
+            onClick={() => onNavigate('admin')}
+            title="Admin Dashboard"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all flex-shrink-0 ${
+              page === 'admin'
+                ? 'bg-rose-500/15 border-rose-500/40 text-rose-400'
+                : 'bg-slate-900/60 border-slate-800 text-slate-600 hover:text-slate-400'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5" />
+            Admin
+          </button>
+        )}
       </div>
 
       {/* Phase color strip */}
-      <div className={`h-[2px] ${cfg.bar} opacity-50`} />
+      <div className={`h-[2px] ${round ? cfg.bar : 'bg-slate-700'} opacity-50`} />
     </header>
   );
 }
