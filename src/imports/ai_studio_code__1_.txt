@@ -1,0 +1,55 @@
+import React, { useState } from 'react';
+import { BeatmapCard } from './components/BeatmapCard';
+import { BeatmapBounty } from './types';
+
+const sampleBeatmap: BeatmapBounty = {
+  id: 'qshell',
+  title: 'QSHELL -Kyoshoku no Shell-',
+  artist: 'Se-U-Ra',
+  mapper: 'Azzedd',
+  genre: 'Electronic',
+  difficultyRating: 3.54,
+  difficultyCategory: 'Normal',
+  difficultyName: "Dored's Hard",
+  votes: 1420,
+  userVoted: false,
+  userFavorited: false,
+  bannerUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
+  previewDuration: '1:00',
+  previewSeconds: 60,
+  currentPlaybackTime: 0,
+  isPlaying: false,
+  bpm: 199,
+  length: '02:00',
+  circleSize: 3.8,
+  approachRate: 8.0,
+  accuracy: 6.0,
+  hpDrain: 5.0,
+  bountyRewardPoints: 50,
+  description: 'Polyrhythmic synth map with clean stream flow.',
+  comments: [],
+};
+
+export function CardDemo() {
+  const [bounty, setBounty] = useState(sampleBeatmap);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0.35);
+
+  return (
+    <div className="max-w-xs p-4">
+      <BeatmapCard
+        bounty={bounty}
+        isPlaying={isPlaying}
+        audioProgress={progress}
+        onTogglePlay={() => setIsPlaying(!isPlaying)}
+        onScrubAudio={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          setProgress((e.clientX - rect.left) / rect.width);
+        }}
+        onVote={() => setBounty({ ...bounty, userVoted: !bounty.userVoted })}
+        onFavorite={() => setBounty({ ...bounty, userFavorited: !bounty.userFavorited })}
+        onOpenComments={() => console.log('Open comments')}
+      />
+    </div>
+  );
+}
