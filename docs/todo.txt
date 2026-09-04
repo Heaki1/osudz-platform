@@ -1,0 +1,1120 @@
+# osu!dz — MASTER TODO
+
+Baseline: commit 1bcad8e ("feat: implement server-authoritative voting and
+centralize phase gating"). Written 2026-09-04, revised the same day to carry
+the owner's decisions on D1, B6, C2, B10, E2, E4, A5, B11, C5 and A4.
+Supersedes the status report that previously lived in this file.
+
+Areas run in implementation order: A submission, B voting, C round/phase
+lifecycle, D winner/results, E challenge, F archive, G oauth/security,
+H final testing and cleanup. Within an area, items are numbered in the order
+they should be built.
+
+STATUS  DONE     landed at or before the baseline
+        TODO     ready to build, dependencies satisfied
+        BLOCKED  cannot start — needs an owner decision or something else first
+
+
+# THE LOOP — every TODO item follows these six steps
+
+  1 INSPECT       read the files the item names before touching anything, and
+                  confirm its claims still hold at current HEAD
+  2 IMPLEMENT     only that item's change; no drive-by edits, no bundling
+  3 TEST          the item's own verification, plus always:
+                    npx tsc --noEmit                 (repo root)
+                    cd server && npx tsc --noEmit
+                    npm run build                    (repo root)
+  4 INSPECT DIFF  git status --short
+                  git diff — read every hunk; nothing unrelated may be in it
+  5 COMMIT        git add only that item's files, one item per commit, with the
+                  subject the item gives and a prose body saying why
+  6 VERIFY COMMIT git log -1 --stat, then git status --short must come back clean
+
+Each item below repeats these six with its own specifics. Do not modify the
+completed voting work in section B unless an actual bug is found; if one is,
+fix it as its own item with its own commit.
+
+
+# ORDER OF WORK
+
+  D1 is now decided (see THE WINNER STATE MACHINE below), so D2 is the pivot:
+  it is the first item everything in E and F stands on.
+
+    A3 ────┐
+    C3 ────┤  independent, buildable now, no decision outstanding
+    G2 G3 ─┤
+    H1 H2 ─┘
+
+    C3 ──> C2                         (auto-advance needs one legal direction)
+    D2 ──> D3 ──> E1 ──> E3           (E1 also needs E2's fetch path)
+              └─> F1 ──> F2
+    D2 ──> B7                         (the vote page's winner state)
+    D2 ──> B10                        (tiebreak is a winner_status value)
+    C4 ──> C5
+    A4 ──> A5                         (one favorites store, then the import button)
+    A5 ──> E2                         (only if per-user tokens turn out necessary)
+
+
+# A. SUBMISSION
+
+  A1  Submit a beatmap by URL, with admin review                        [DONE]
+      Landed in abd9000. Server-side osu! lookup, mod and challenge
+      requirement, one entry per player per round, approve/reject.
+
+  A2  Dashboard shows the caller's own entry and its review state        [DONE]
+      Landed in e301e80, sharing REVIEW_PRESENTATION with the submit page.
+
+  A3  Let a submitter withdraw their entry                               [TODO]
+      WHAT   DELETE /api/submissions/mine — requireEligible, submission phase
+             only, deletes the caller's row in the open round. A withdraw button
+             on the submit page's MySubmission panel and on the dashboard's
+             YourSubmission panel.
+      WHY    src/lib/submission.ts REVIEW_PRESENTATION tells a rejected
+             submitter to ask an administrator, because one entry per player per
+             round plus no delete endpoint means they cannot act alone.
+      DEPS   none
+      VERIFY curl DELETE unauthenticated -> 401; as the owner in the voting
+             phase -> 409; in the submission phase -> 200 and the row is gone;
+             GET /api/submissions/mine then answers null.
+      STEPS  1 INSPECT   server/src/routes/submissions.ts, server/src/repo/
+                         submissions.ts, src/components/platform/
+                         PlatformSubmitPage.tsx
+             2 IMPLEMENT repo remove(), route, both buttons
+             3 TEST      the four curls above, both typechecks, build
+             4 DIFF      git status --short; git diff — those files only
+             5 COMMIT    "feat: let a submitter withdraw their entry"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  A4  Persist osu!DZ community favorites                                 [TODO]
+      DECIDED  There are TWO favorite sources and they must not be conflated:
+               osu!DZ community favorites (this item) and the player's official
+               osu! favorites (A5). Both are presented through the same favorites
+               UI, distinguished by source; the osu! import must never replace or
+               overwrite the community set.
+      WHAT   favorites table (user_id, difficulty_id, source, created_at, unique
+             on user_id + difficulty_id + source) where source is 'dz' for a map
+             favorited on this site and 'osu' for one imported in A5. Endpoints
+             GET /api/favorites, PUT and DELETE /api/favorites/:difficultyId.
+             App.handleFavorite calls them instead of flipping React state, and
+             BeatmapCardPlatform stops keeping its own copy in useState.
+      WHY    src/App.tsx:157 mutates state only, so every heart is lost on
+             reload. docs/my_plan.txt:118 ("browse their website favorites") and
+             :258 ("Show the user's current website favorites") make the
+             community set the primary one; :683-689 specifies the button's two
+             states, "Add Favorite" and "Favorited".
+      DEPS   none. Build the source column now even though only 'dz' is written
+             yet, so A5 does not need a second migration.
+      VERIFY favorite a map, reload, it is still filled; psql shows one row with
+             source 'dz'; unfavorite removes it; favoriting the same map twice
+             does not create a second row.
+      STEPS  1 INSPECT   src/App.tsx, src/components/platform/
+                         BeatmapCardPlatform.tsx, DashboardPage.tsx favorites
+                         section, server/migrations/001_core.sql
+             2 IMPLEMENT migration, repo/favorites.ts, routes/favorites.ts,
+                         client seam, App wiring, card cleanup
+             3 TEST      pnpm run migrate:status then migrate, the four checks
+                         above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: persist osu!DZ favorites server-side"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  A5  "Load my osu! favorites" button                                    [TODO]
+      DECIDED  A button imports the player's official osu! favorites from the
+               osu! API into the same favorites UI as the community set, tagged
+               source 'osu'. It never replaces or overwrites source 'dz' rows.
+               TOKEN STORAGE IS NOT TO BE IMPLEMENTED YET. Compare the three
+               designs against the architecture first; "reconnect to osu!" (b) is
+               the preferred low-risk option unless inspection gives a strong
+               reason to prefer another. Nothing is stored until that comparison
+               is on the table and agreed.
+      WHAT   POST /api/favorites/import — reads the caller's osu! favourites and
+             upserts them with source 'osu'. Wire the "Load my osu! favorites"
+             button that already exists in the dashboard's favorites header, and
+             drop favoriteBeatmaps from the submit page and the dashboard.
+      WHY    docs/my_plan.txt:119 ("import/load favorites from their osu!
+             profile") and :264-266 ("Load my osu! favorites" / "This retrieves
+             favorites from the user's osu! profile"). Both surfaces currently
+             show six fabricated maps.
+      DEPS   A4 for the store. Possibly a token decision — see below.
+      TOKEN FINDINGS (inspected at 1bcad8e, no code changed):
+             - The login flow requests scope 'identify public'
+               (server/src/services/osu.ts:15) and exchanges the code for an
+               access token at :40-62. exchangeCode reads ONLY access_token from
+               the response body, so the refresh_token osu! returns is discarded
+               before anything could store it.
+             - That user token is used exactly once, for GET /me
+               (routes/auth.ts:47 via fetchMe), and then goes out of scope. No
+               token is written to the database; there is no tokens table.
+             - Beatmap lookups use a separate client-credentials token
+               representing the application, scope 'public', cached in memory
+               with a minute of slack (services/osu.ts:110-140).
+             - CONSEQUENCE: reading a player's own favourites is a user-context
+               request, so it needs either a live user token or a fresh
+               authorize round trip. Two designs avoid storage entirely:
+               (a) import during the login round trip, while the token is still
+               in hand — no storage, but only refreshes at login;
+               (b) a dedicated "reconnect to osu!" authorize hop triggered by the
+               button, importing inside that request and discarding the token.
+               Storing access and refresh tokens is the third option and the only
+               one that can import unattended; it is also the only one that
+               creates a credential store worth stealing.
+      VERIFY press the button; the imported maps appear tagged as osu! favorites;
+             existing community favorites are all still present and unchanged;
+             pressing it twice does not duplicate rows.
+      STEPS  1 INSPECT   server/src/services/osu.ts, routes/auth.ts,
+                         src/components/platform/DashboardPage.tsx favorites
+             2 IMPLEMENT the chosen no-storage design, route, button wiring
+             3 TEST      the four checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: import the player's osu! favorites on request"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+
+# B. VOTING
+
+  B1  Server-authoritative voting                                        [DONE]
+      1bcad8e. server/src/repo/votes.ts plus the three endpoints in
+      server/src/routes/votes.ts: cast, change (one ON CONFLICT DO UPDATE),
+      retract, read. Counts stay derived by COUNT(*) at
+      server/src/repo/submissions.ts:67.
+
+  B2  Self-voting prohibited, in both layers                             [DONE]
+      1bcad8e. Server refuses with 409 in routes/votes.ts; the card's button is
+      disabled with the reason, and the vote page states it in prose.
+
+  B3  Centralized phase-gated page access                                [DONE]
+      1bcad8e. PAGE_PHASE, pageAccess and isPageOpen in src/lib/round.ts, read
+      by NavHeader (dimmed tabs), PlatformSubmitPage and VotePage through the
+      shared PhaseGate component. The submit page's private SubmissionClosed and
+      its hardcoded "Round 2 · September 2026" are gone.
+
+  B4  canVote on ApiUser, from one shared rule                           [DONE]
+      1bcad8e. isEligible in server/src/repo/users.ts feeds both requireEligible
+      and toApiUser, so the gate and the flag cannot drift.
+
+  B5  Four vote-surface bugs fixed                                       [DONE]
+      1bcad8e. VoteStandings NaN% divisor; BeatmapCardPlatform's invented
+      "0 / 47" denominator; the dashboard's unpersisted userVote state; and the
+      flip card's 600ms spin queueing a second cast on a double-click.
+
+  B6  Vote page design                                                  [DONE]
+      DECIDED  The vote page as built is the design. It is not to be redesigned
+               or modified, and docs/my_plan.txt:569-575, :913-916 and :940 are
+               satisfied by it. Only a specific missing requirement from the
+               original plan justifies touching the page, and it must be named
+               and agreed before any change.
+
+      AUDIT of the page against docs/my_plan.txt:576-620 and the visual-state
+      list at :799-820, done at 1bcad8e. Present and correct:
+        Round Header      current round, phase label, countdown, rules prose
+        Submitted Beatmaps beatmap card, challenge requirement (card back),
+                          vote button and state, vote count
+        Leading Beatmap   crown badge and the amber #1 row in the standings
+        User Vote         "Vote cast" with the chosen title, "You" in standings,
+                          "Flip a card to vote" when they have not
+        States            empty, error, disabled, locked, phase closed,
+                          phase opening soon, already voted, cannot vote
+      Three requirements from the plan are genuinely absent. None is a redesign;
+      each is tracked as its own item and none changes the layout:
+        1. discussion/comments per entry — my_plan.txt:596. The panel exists in
+           BeatmapCard but is ephemeral and VotePage passes a no-op handler.
+           -> B8
+        2. a loading state — my_plan.txt:801. App holds `loaded` and never passes
+           it to VotePage, so the page renders zeroed stats as though they were
+           final while the first fetch is in flight. -> B12
+        3. a winner state — my_plan.txt:816. Nothing on the page shows the
+           official winner once one exists. -> B7
+
+  B7  Winner state and final standings on the vote page                 [TODO]
+      WHAT   Once voting has closed, the vote page shows the read-only tally and
+             the winner: pending admin approval, awaiting a tiebreak decision, or
+             official. Vote buttons are gone in all three cases. This is the
+             "winner" visual state the plan requires, not a new layout — it reuses
+             VoteStandings and the existing crown treatment.
+      WHY    my_plan.txt:816 lists "winner" among the states that must exist, and
+             :606 says the leader must not look final before voting closes — which
+             implies it should look final afterwards. Right now the page shows only
+             the PhaseGate panel, so the result is not viewable anywhere.
+      DEPS   D2 for winner_status and the recorded winner. Do not build a
+             placeholder winner from live counts — that is the thing D1 replaced.
+      VERIFY with winner_status 'pending' the page says the winner is awaiting
+             approval and names it; with 'tiebreak' it names the tied entries and
+             says an administrator will pick; with 'official' it shows the winner
+             plainly; in every case no vote button renders anywhere on the page.
+      STEPS  1 INSPECT   src/components/platform/VotePage.tsx, PhaseGate.tsx,
+                         src/lib/round.ts
+             2 IMPLEMENT read winner_status from the round, render the three
+                         cases, keep VoteStandings read-only
+             3 TEST      seed each of the three states and look at the page
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: show the round winner on the vote page"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  B8  Comments on submissions                                            [TODO]
+      WHAT   comments table (round_id, submission_id, user_id, parent_id, body,
+             created_at), GET/POST endpoints, and wire BeatmapCard's existing
+             panel to them.
+      WHY    docs/my_plan.txt:596 puts discussion on each vote-page entry, and
+             :620-629 grants commenting to non-Algerian players who cannot vote.
+             The panel exists but is ephemeral — localComments in
+             src/components/BeatmapCard.tsx:38, and VotePage passes
+             onOpenComments={() => {}}.
+      DEPS   none. Note the eligibility split: commenting is requireAuth, not
+             requireEligible.
+      VERIFY post a comment, reload, it is still there; a non-DZ account can
+             comment but still cannot vote.
+      STEPS  1 INSPECT   src/components/BeatmapCard.tsx, VotePage.tsx,
+                         server/migrations/001_core.sql
+             2 IMPLEMENT migration, repo/comments.ts, routes/comments.ts, client
+                         seam, panel wiring
+             3 TEST      the reload check, the non-DZ check, typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: persist per-submission comments"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  B9  Record when a vote was last moved                                  [TODO]
+      WHAT   Migration adding votes.updated_at, set by the ON CONFLICT DO UPDATE
+             in server/src/repo/votes.ts.
+      WHY    votes carries created_at only (server/migrations/001_core.sql:94),
+             and a change is an in-place UPDATE, so a previous choice and the
+             time it moved are unrecoverable. The repo comment says so.
+      DEPS   none
+      VERIFY cast, then move the vote; created_at is unchanged and updated_at is
+             newer, read with psql.
+      STEPS  1 INSPECT   server/migrations/, server/src/repo/votes.ts
+             2 IMPLEMENT migration 00N_votes_updated_at.sql plus the SET clause
+             3 TEST      pnpm run migrate:status, migrate, the psql check above
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: record when a vote was last changed"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  B10 Tiebreak state, resolved by an administrator                       [TODO]
+      DECIDED  A tie is never resolved automatically. When voting ends with two or
+               more entries level at the top, the round pauses in a TIEBREAK state
+               until an administrator selects one winner, which then follows the
+               normal approval path to official.
+      WHAT   winner_status = 'tiebreak' with every tied submission recorded, an
+             admin endpoint to select one of them, and an admin panel listing the
+             tied entries. Selecting one sets winning_submission_id and moves the
+             status to 'official' in the same write.
+      WHY    Ties were previously unspecified, and the incidental behaviour was
+             that the newest entry won: DashboardPage's reduce keeps the first
+             element on a tie and the submissions query orders newest-first.
+      DEPS   D2 — 'tiebreak' is one of winner_status's values, so it lands with
+             the state machine rather than after it.
+      VERIFY seed two entries with equal top counts, end voting: winner_status is
+             'tiebreak', no winner is set, the phase has not advanced, and votes
+             are refused; an admin selects one and it becomes official; attempting
+             to select an entry that was not tied is refused.
+      STEPS  1 INSPECT   server/src/repo/rounds.ts, server/src/routes/admin.ts,
+                         src/components/platform/AdminDashboard.tsx
+             2 IMPLEMENT the tiebreak branch, the admin select endpoint, the panel
+             3 TEST      the five checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: pause the round on a tie until an admin decides"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  B11 Ballot secrecy, with an admin moderation view                      [TODO]
+      DECIDED  Normal users must never see which account voted for which map.
+               Only administrators may see voter-to-map detail, and only for
+               moderation. Aggregate totals stay public exactly as the vote page
+               already shows them.
+      WHAT   GET /api/admin/votes behind requireAdmin, returning voter and target
+             per row for the open round, plus an admin panel. No public endpoint
+             gains voter identity.
+      WHY    There is no admin vote endpoint at all, so an administrator
+             investigating a dispute has nothing to look at.
+             Confirmed at 1bcad8e that nothing leaks today: GET /votes/my is
+             per-caller, voteCount is an aggregate COUNT(*), and the "You" pill in
+             VoteStandings marks only the caller's own row. This item must not
+             change that.
+      DEPS   none
+      VERIFY the admin endpoint answers 403 for a non-admin session and 401 signed
+             out; the admin panel shows voter-to-map rows; grep the public routes
+             and confirm no user id or username rides along with any vote count.
+      STEPS  1 INSPECT   server/src/routes/votes.ts, routes/admin.ts,
+                         server/src/repo/votes.ts, VotePage.tsx standings
+             2 IMPLEMENT repo listForRound, admin route, admin panel
+             3 TEST      the three checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: give administrators a vote moderation view"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  B12 Loading state on the vote page                                     [TODO]
+      WHAT   Pass App's `loaded` into VotePage and render a loading state instead
+             of zeroed stats while the first fetch is in flight.
+      WHY    my_plan.txt:801 requires a loading state, and :820 says not to design
+             only the happy path. App.tsx holds `loaded` and passes it to the
+             submit page but not to the vote page, so on a cold load the vote page
+             briefly presents "0 total votes" and an empty grid as if they were the
+             answer. One of the three gaps found by the B6 audit.
+      DEPS   none
+      VERIFY throttle the network, reload on the vote page, and see a loading
+             state rather than a confident zero.
+      STEPS  1 INSPECT   src/App.tsx, src/components/platform/VotePage.tsx
+             2 IMPLEMENT a loading prop and branch, matching the submit page's
+                         existing spinner idiom
+             3 TEST      the throttled reload above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "fix: show a loading state on the vote page"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+
+# C. ROUND / PHASE LIFECYCLE
+
+  C1  Round lifecycle and admin controls                                 [DONE]
+      Landed in c84598a. Create a round, advance phases, cascade the schedule,
+      rounds_single_open keeps exactly one round live.
+
+  C2  Automatic phase progression, admin override kept                   [TODO]
+      DECIDED  Submission -> Voting -> Challenge -> Archive advances automatically
+               on the configured phase end times, with one exception: Voting ->
+               Challenge requires winner approval. Administrators may also advance
+               by hand when appropriate. Backwards transitions are refused (C3).
+               The next round does NOT open automatically: only an admin creates
+               it, and only after the previous round is archived.
+      WHAT   An advance-if-due check that runs server-side before the open round is
+             served — in findCurrent, or in a small tick beside it — comparing the
+             current phase's *_ends_at to now() and applying exactly the same
+             transition the admin endpoint applies, through the same repo function
+             so the two paths cannot diverge.
+
+             THE FULL CHAIN, and what is automatic in each step:
+
+               submission --(submission_ends_at passes)--> voting        AUTOMATIC
+               voting     --(voting_ends_at passes)------> ballot closes AUTOMATIC
+                                                           winner_status becomes
+                                                           'pending' or 'tiebreak';
+                                                           phase stays 'voting'
+               voting     --(admin approves the winner)--> challenge     ADMIN ONLY
+               challenge  --(challenge_ends_at passes)---> ended         AUTOMATIC
+                                                           = archived
+               (next round)                                              ADMIN ONLY
+
+             'Archive' is the existing phase value 'ended'; no new phase is needed.
+             Consequence to design for: src/lib/round.ts toCurrentRound maps an
+             ended round to null, so the moment a round auto-archives every page
+             reads "No active round" until an admin opens the next one. That is the
+             decision working as intended, not a bug — but the dashboard's empty
+             state is what players will see, so check it reads well.
+      WHY    docs/my_plan.txt promises automation four times (:22, :147, :771,
+             :781-788) and says at :773 the UI must communicate that the round is
+             automated. Today there is no clock anywhere in server/src and
+             *_ends_at is never compared to now(), so "Ends in 6d 20h" is a
+             countdown to nothing.
+      DEPS   C3 first — an automatic advance must have exactly one legal direction.
+             D2 for the voting-end branch.
+      VERIFY set submission_ends_at a minute out, wait, and the phase is 'voting'
+             on the next read with no admin action; set voting_ends_at a minute out
+             and the phase stays 'voting' with winner_status 'pending' instead, and
+             POST /api/votes answers 409; approve, and the phase is 'challenge';
+             set challenge_ends_at a minute out and the round becomes 'ended' by
+             itself while NO new round appears; an admin advance still works at any
+             time; two concurrent reads do not double-advance.
+      STEPS  1 INSPECT   server/src/repo/rounds.ts, server/src/routes/rounds.ts,
+                         server/src/routes/admin.ts
+             2 IMPLEMENT the due check and one shared transition function
+             3 TEST      the four checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: advance round phases automatically when due"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  C3  Reject backwards phase transitions                                 [TODO]
+      WHAT   Validate the transition, not just the phase name, in
+             PATCH /api/admin/round/phase.
+      WHY    isRoundPhase in server/src/repo/rounds.ts only checks set
+             membership, so challenge -> submission is accepted. Votes cast in
+             the meantime persist and keep counting, and with a stored winner
+             (D2) a backwards move would silently contradict it.
+      DEPS   none. Do it before D2 so the winner write has one direction to
+             worry about.
+      VERIFY advance to voting, then attempt submission -> 409; forward moves
+             still work; passing an unknown phase still -> 400.
+      STEPS  1 INSPECT   server/src/routes/admin.ts, server/src/repo/rounds.ts
+             2 IMPLEMENT an allowed-transition table beside LIVE_PHASES
+             3 TEST      the three curls above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "fix: refuse backwards round phase transitions"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  C4  Country allowlist, replacing the hardcoded constant                [TODO]
+      WHAT   An allowed_countries table plus admin endpoints, read by isEligible
+             in place of ELIGIBLE_COUNTRY = 'DZ'. Wires the admin Eligibility
+             tab's country half, which currently saves nothing.
+      WHY    docs/my_plan.txt:741 says "allowed countries", plural and
+             administrator-configurable. The code has one constant, and
+             AdminDashboard.tsx:18 lists only 'round' and 'submissions' as
+             wired tabs.
+      DEPS   none, but do it before C5 — both land in the same admin tab and the
+             same eligibility read.
+      VERIFY enable a second country, a test account from it can vote; disable
+             DZ and a DZ account is refused with the same 403 as today.
+      STEPS  1 INSPECT   server/src/repo/users.ts, server/src/middleware/auth.ts,
+                         src/components/platform/AdminDashboard.tsx
+             2 IMPLEMENT migration, repo, admin routes, tab wiring, WIRED_TABS
+             3 TEST      the two eligibility checks, typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: make the voting country allowlist configurable"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  C5  Manual per-participant submit and vote controls                    [TODO]
+      DECIDED  These are manual administrator controls applied after an
+               investigation, not an automatic punishment system. Submitting and
+               voting are controlled INDEPENDENTLY: an admin may stop a
+               participant from submitting, from voting, or from both, and may
+               equally grant either to someone the country rule would refuse.
+      WHAT   A participant_permissions table (user_id, can_submit, can_vote, note,
+               set_by, set_at) consulted by the eligibility read, plus the admin
+               Eligibility tab's per-player half. Absent a row, the country rule
+               decides as it does today. A row overrides it in either direction,
+               per capability.
+      WHY    docs/my_plan.txt:231 and :761-763 let an administrator allow selected
+             players regardless of country; server/src/repo/users.ts records the
+             gap in its own comment. The mock admin UI also shows a single "ban"
+             toggle, which this replaces with the two independent switches — a
+             blanket ban is a coarser thing than the decision asks for (see C6).
+      DEPS   C4
+      VERIFY a block is forward-only — a vote the account already cast is still
+             counted after the block, and its target's voteCount does not change;
+             block voting for a DZ account: it cannot vote and CAN still submit;
+             block submitting for another: the reverse; grant voting to a non-DZ
+             account: it can vote; remove the row: the country rule applies again;
+             every refusal still answers 403 with a human sentence.
+      STEPS  1 INSPECT   server/src/repo/users.ts, server/src/middleware/auth.ts,
+                         AdminDashboard.tsx eligibility and users tabs
+             2 IMPLEMENT migration, repo, admin routes, tab wiring
+             3 TEST      the five checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: let admins control submitting and voting per player"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  C6  Full account ban                                             [NOT ASKED]
+      Folded into C5. The decision asks for independent submit and vote controls,
+      which is finer-grained than a blanket ban, so C5 replaces the admin users
+      tab's mock "banned" toggle with the two switches. A ban that also blocks
+      reading and commenting was not requested and is not being built. Reopen this
+      item only if that is wanted, in which case it also needs G6 — a stateless
+      30-day session cookie means a ban does not end the session already in flight.
+
+  C7  Audit the admin tabs, then wire or retire them                     [TODO]
+      DECIDED  INSPECT FIRST. Identify exactly which tabs are meant, what each one
+               renders today, and where it is used. Delete nothing until what is
+               obsolete has been named and the reason written down. A tab that a
+               planned item will fill stays as a placeholder; a tab that
+               corresponds to nothing in docs/my_plan.txt or this roadmap needs an
+               owner decision before removal.
+      WHAT   Phase one is a written audit, per tab: its key, label, whether it is
+             in WIRED_TABS, exactly what it renders (real data, inline mock rows,
+             or a sampleData import), which API calls it makes, and which roadmap
+             item claims it. Phase two acts on that audit, one tab per commit.
+      WHY    AdminDashboard.tsx:15 declares seven tabs — round, submissions,
+             eligibility, rules, challenge, users, config — and :18 declares two
+             wired. The other five render convincingly and save nothing, which is
+             worse than not existing. But several are already claimed: eligibility
+             by C4 and C5, challenge by E1 and E2, users by C5, and new panels are
+             owed by B10 (tiebreak selection) and B11 (vote moderation). Only what
+             is left after those is genuinely obsolete.
+      DEPS   The audit depends on nothing — do it early, it informs C4, C5, B10 and
+             B11. Acting on it depends on those items landing first.
+      VERIFY the audit names every tab and its fate; after phase two, every visible
+             tab either saves something real or is gone, and no tab renders
+             fabricated rows.
+      STEPS  1 INSPECT   src/components/platform/AdminDashboard.tsx in full,
+                         docs/my_plan.txt admin section, this roadmap
+             2 IMPLEMENT the audit as a section in this file; then, later, wire or
+                         delete one tab per commit
+             3 TEST      click every tab, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "docs: audit the admin tabs" then one per tab afterwards
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+
+# D. WINNER / RESULTS  ← the pivot for E and F
+
+  D1  Winner freeze                                                   [DECIDED]
+      DECIDED  When voting ends, the server automatically determines the
+               submission with the highest valid vote count and records it as
+               PENDING ADMIN APPROVAL. The winner is not official until an
+               administrator approves it. Once approved, the official winner is
+               persisted permanently and does not move again — later retractions,
+               rejections or vote changes cannot rewrite it.
+               A tie does not auto-resolve: it pauses in TIEBREAK (B10).
+      WHY    Nothing records a winner today — all three migrations grep clean for
+             winner/winning, DashboardPage recomputes it live by reducing over
+             voteCount, and the challenge hero takes the month's required mod and
+             challenge type from that, so once a round ends the challenge map is
+             unrecoverable. server/src/routes/rounds.ts:37-39 records the gap, and
+             docs/my_plan.txt:786-788 lists "winner selected" as a distinct step.
+      IMPLEMENTED BY  D2 (record and approve), D3 (serve and consume),
+                      B10 (the tiebreak branch), B7 (the vote page's winner state).
+
+
+# THE WINNER STATE MACHINE  (D1 + B10 + C2, in one place)
+
+  rounds gains winner_status, one of:
+
+    none        the round has not finished voting
+    pending     voting closed, one clear top entry, awaiting admin approval
+    tiebreak    voting closed, two or more level at the top, awaiting an admin
+                choosing between them
+    official    an admin approved it; permanent
+
+  voting_ends_at passes (C2), or an admin ends voting by hand
+        │
+        ├── exactly one highest count ──> winner_status = 'pending'
+        │                                 winning_submission_id = that entry
+        │                                 winner_vote_count, total_votes frozen
+        │                                 phase stays 'voting'
+        │                                 admin approves ──> 'official', phase 'challenge'
+        │
+        └── two or more tied ──────────> winner_status = 'tiebreak'
+                                          tied entries recorded, no winner set
+                                          phase stays 'voting'
+                                          admin selects one ──> 'official', phase 'challenge'
+
+  A VALIDLY CAST VOTE IS PERMANENT. Blocking a voter later (C5) only stops them
+  voting again; it never removes a vote already cast. Rejecting a submission after
+  votes were cast for it does not retroactively delete or discount those votes
+  either. The only way a recorded result changes is an administrator performing an
+  explicit, separate result correction (D4) — never as a side effect of a block or
+  a review. So "highest valid vote count" means: every vote that was validly cast
+  while the ballot was open, counted as cast.
+
+  THE BALLOT CLOSES ON winner_status, NOT ON THE PHASE. The vote endpoints
+  currently gate on phase === 'voting' alone; they must also require
+  winner_status === 'none', or votes would keep landing while a winner sat pending
+  and the frozen counts would stop matching the table.
+
+  D2  Record the winner, pending approval, then make it official        [TODO]
+      WHAT   Migration adding to rounds: winner_status (checked against the four
+             values), winning_submission_id (nullable FK to submissions),
+             winner_vote_count, total_votes, winner_approved_by, winner_approved_at.
+             A tied_submission_ids column or a small round_tied_entries table for
+             the tiebreak case.
+             Closing voting computes the top entry and writes 'pending' (or
+             'tiebreak'), all inside one transaction. A second admin endpoint
+             approves: it sets 'official', stamps who and when, and moves the phase
+             to 'challenge' in the same transaction. Approving twice is refused.
+             The vote endpoints gain `winner_status === 'none'` beside their
+             existing phase check, so the ballot closes when the winner is computed.
+      WHY    D1. The challenge phase and the archive must read a fact rather than
+             recompute an opinion, and an approved winner must survive later vote
+             retractions. src/types.ts ArchiveEntry already names the shape wanted:
+             winner with votes and totalVotes.
+      DEPS   C3 (one legal transition direction). B10 lands with it — 'tiebreak' is
+             one of this column's values.
+      VERIFY seed a round with a clear leader and close voting: status 'pending',
+             the winner and both counts frozen, phase still 'voting', and a POST
+             /api/votes now answers 409; approve it: status 'official', phase
+             'challenge', approver stamped; retract a vote afterwards and none of
+             the frozen numbers move; approve again -> refused; a non-admin
+             approval -> 403.
+      STEPS  1 INSPECT   server/src/routes/admin.ts, server/src/repo/rounds.ts,
+                         server/src/repo/votes.ts, server/src/routes/votes.ts,
+                         server/migrations/
+             2 IMPLEMENT migration, repo writes, close-voting and approve handlers,
+                         the extra vote-endpoint check
+                         (note: nothing in server/src uses a transaction yet — this
+                         is the first, so take a client with pool.connect)
+             3 TEST      the six checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: record a pending winner when voting closes"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  D3  Serve and consume the stored winner                                [TODO]
+      WHAT   ApiRound gains winner_status and the winner fields; CurrentRound
+             carries them through toCurrentRound; GET /api/rounds/:id returns the
+             winning submission plus the tally, filling the TODO at
+             server/src/routes/rounds.ts:37-39; the dashboard's challenge hero
+             reads the recorded winner instead of recomputing leadingMap, and shows
+             an honest waiting state while the status is 'pending' or 'tiebreak'.
+      WHY    Until the client reads the stored value, freezing it changes nothing on
+             screen — and the challenge hero would still be quoting a live count
+             that the approved winner no longer has to match.
+      DEPS   D2
+      VERIFY GET /api/rounds/<id> carries the winner; the challenge hero renders
+             the same map after a vote is retracted; with no winner recorded the
+             hero shows an honest empty state rather than a guess.
+      STEPS  1 INSPECT   server/src/routes/rounds.ts, server/src/repo/rounds.ts,
+                         src/api/client.ts, src/lib/round.ts,
+                         src/components/platform/DashboardPage.tsx
+             2 IMPLEMENT DTO, route, toCurrentRound, hero rewiring
+             3 TEST      the three checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: serve the recorded round winner to the client"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+
+  D4  Administrator result correction                                    [TODO]
+      DECIDED  The only way a recorded result changes after the fact. A validly
+               cast vote is permanent and neither a later voter block nor a later
+               submission rejection touches it, so if a result genuinely has to be
+               corrected an administrator must do it explicitly and visibly.
+      WHAT   An admin endpoint that overrides a round's recorded winner, requiring a
+             reason, stamping who did it and when, and leaving the previous value
+             recoverable rather than overwritten in place.
+      WHY    Without it, the permanence rule has no escape hatch and the only
+             remedy for a mistake would be editing the database by hand.
+      DEPS   D2. Low priority — build it when a correction is actually needed, but
+             do not let the permanence rule ship implying this already exists.
+      VERIFY correct a winner: the new value is recorded, the old one is still
+             readable, the reason and the actor are stored, and a non-admin is
+             refused with 403.
+      STEPS  1 INSPECT   server/src/repo/rounds.ts, server/src/routes/admin.ts
+             2 IMPLEMENT the endpoint and its audit columns or table
+             3 TEST      the four checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: let an admin correct a recorded round result"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+
+# E. CHALLENGE
+
+  E1  Challenge score endpoints, with qualification computed             [TODO]
+      WHAT   Routes over the existing challenge_scores table: submit or record a
+             score, list a round's leaderboard. Compute the qualified column on
+             insert against the winning entry's mod and challenge requirement.
+      WHY    server/migrations/002_challenge_scores.sql has existed since the
+             schema pass and nothing in server/src reads or writes it — the only
+             mention is a comment at server/src/routes/rounds.ts:39. Migration
+             002 documents qualified as "computed on insert", and no code
+             computes it. Note the table keys on round_id only, with no
+             submission or beatmap reference, so the requirement to judge
+             against has to come from the round's winner.
+      DEPS   D3 — qualification is meaningless until the winning entry's
+             requirements are a stored fact. E2 supplies the scores it judges.
+      VERIFY post a score meeting the requirement -> qualified true; one missing
+             it -> false; the leaderboard orders by score desc via the existing
+             challenge_scores_leaderboard index; one row per user per round is
+             enforced.
+      STEPS  1 INSPECT   server/migrations/002_challenge_scores.sql,
+                         server/src/routes/rounds.ts, server/src/repo/rounds.ts
+             2 IMPLEMENT repo/challengeScores.ts, routes/challenge.ts, mount it
+                         in server/src/index.ts, client seam
+             3 TEST      the four checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: implement challenge score submission"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  E2  Fetch scores from osu!, with a manual admin path as well            [TODO]
+      DECIDED  BOTH. A player's score on the winning map is fetched automatically
+               from the osu! API and recorded in challenge_scores, AND
+               administrators must have a manual import or entry option alongside
+               it — for a score the API will not give up, or a correction.
+      WHAT   A fetch path that reads the caller's score for the winning
+             difficulty and upserts it (osu_score_id is already UNIQUE for exactly
+             this, so the same play cannot land twice), plus an admin endpoint that
+             records or overrides a score by hand with the actor recorded.
+      WHY    challenge_scores.osu_score_id exists and is documented as being for
+             API-imported scores rather than hand-entered ones, so both paths were
+             anticipated in the schema and neither was built.
+      DEPS   D3 (the winning difficulty must be a stored fact), E1 (the table's
+             routes), and possibly A5 — see the token question below.
+      OPEN QUESTION, cheap to settle: can the application's client-credentials
+             token read another account's score, or is a user token required?
+             server/src/services/osu.ts:110-140 already mints a client-credentials
+             token with scope 'public'. One request settles it, with no code change:
+               curl -H "Authorization: Bearer <app token>"                  https://osu.ppy.sh/api/v2/beatmaps/4907876/scores/users/<osu id>
+             If it answers, no per-user token is needed for scores and A5's storage
+             question stays confined to favourites. If it refuses, the fetch needs
+             one of A5's no-storage designs or a stored token, and that becomes a
+             security decision before any of E2 is built.
+      VERIFY set a play on the winning map, fetch it, and the row matches the osu!
+             API exactly; fetch again and no duplicate appears; an admin overrides
+             it and the override is attributed.
+      STEPS  1 INSPECT   server/src/services/osu.ts,
+                         server/migrations/002_challenge_scores.sql, E1's routes
+             2 IMPLEMENT settle the open question first, then the fetch path and
+                         the admin path
+             3 TEST      the three checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: fetch challenge scores from the osu! API"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  E3  Real challenge leaderboard on the dashboard                        [TODO]
+      WHAT   ChallengeLeaderboard reads the E1 endpoint instead of challengeScores
+             from sampleData.ts, with empty and loading states.
+      WHY    src/components/platform/DashboardPage.tsx renders seven fabricated
+             rows, one flagged isMe, during the challenge phase.
+      DEPS   E1
+      VERIFY with no scores the panel says so; with scores it matches what psql
+             shows, in the same order.
+      STEPS  1 INSPECT   src/components/platform/DashboardPage.tsx,
+                         src/components/platform/sampleData.ts
+             2 IMPLEMENT fetch in App's refresh, props down, empty state
+             3 TEST      both states above, typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: render the real challenge leaderboard"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  E4  Bounty as the challenge prize                                      [TODO]
+      DECIDED  The bounty is the Challenge prize, and the default prize is one
+               month of osu!supporter. It is per-round and an admin may change it
+               when opening a round.
+      WHAT   Default rounds.reward to 'One month of osu!supporter' when a round is
+             created without one, and surface it wherever the challenge is
+             presented: the round header, the challenge hero, and the archive entry.
+             The admin round form already has a reward field — check it sends the
+             value and shows the default.
+      WHY    docs/my_plan.txt:164-172 names the bounty and says the winner receives
+             it. rounds.reward is a free-text column today that nothing reads, so
+             the prize is invisible to every player.
+      DEPS   none for the default and the display. Whether the platform tracks
+             delivery of the prize is not part of this and was not asked for.
+      VERIFY create a round with no reward: it reads one month of osu!supporter;
+             create one with a custom reward: that is what shows; the challenge
+             hero and the archive entry both display it.
+      STEPS  1 INSPECT   server/src/repo/rounds.ts, server/src/routes/admin.ts,
+                         src/components/platform/AdminDashboard.tsx,
+                         DashboardPage.tsx challenge hero
+             2 IMPLEMENT the default, the DTO pass-through, the three surfaces
+             3 TEST      the three checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: show the round bounty as the challenge prize"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+
+# F. ARCHIVE
+
+  F1  Archive API over completed rounds                                  [TODO]
+      WHAT   Extend GET /api/rounds and /api/rounds/:id to serve ended rounds
+             with the winner, its vote count and the round total, the challenge
+             leaderboard, and the participant count.
+      WHY    The archive is specified as an immutable snapshot rather than a view
+             over live rows, and src/types.ts ArchiveEntry already names exactly
+             those fields. server/src/routes/rounds.ts:37-39 records the gap.
+      DEPS   D2 for the winner, E1 for the leaderboard. If either is missing the
+             endpoint should omit that half rather than fabricate it.
+      VERIFY end a seeded round; GET /api/rounds returns it with a winner and a
+             tally; the numbers match psql; a round with no challenge scores
+             returns an empty leaderboard rather than an error.
+      STEPS  1 INSPECT   server/src/routes/rounds.ts, server/src/repo/rounds.ts,
+                         src/types.ts
+             2 IMPLEMENT repo query, route, DTO
+             3 TEST      the three checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: serve completed rounds for the archive"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  F2  ArchivePage reads the API; delete archiveData                      [TODO]
+      WHAT   Give ArchivePage props and real data, add empty and loading states,
+             remove the hardcoded "Round 4 · August 2026 is currently in
+             progress" line, and delete archiveData from sampleData.ts.
+      WHY    src/components/platform/ArchivePage.tsx takes no props and calls no
+             API. Every winner, vote share and leaderboard row on that page is
+             fabricated, including the "Total votes cast" stat summed from three
+             invented rounds. It is the most convincing fiction left in the app.
+      DEPS   F1
+      VERIFY with no ended rounds the page says the archive is empty; with one it
+             matches the API exactly; grep src/ for archiveData returns nothing.
+      STEPS  1 INSPECT   src/components/platform/ArchivePage.tsx, sampleData.ts,
+                         src/App.tsx
+             2 IMPLEMENT props, fetch, empty state, delete the sample export
+             3 TEST      both states, the grep, typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: render the archive from real rounds"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+
+# G. OAUTH / SECURITY
+
+  G1  Delete or reset osu! application 66562                             [TODO]
+      WHAT   Its client secret is reportedly still live after being leaked.
+             Delete the application or reset the secret, then update
+             OSU_CLIENT_SECRET in server/.env.
+      WHY    A live leaked secret lets anyone impersonate this application
+             against the osu! API.
+      DEPS   none. Operational — Heaki only; no code change, and nothing in the
+             repo can fix it.
+      VERIFY logging in still works after the rotation, and the old secret is
+             rejected.
+      STEPS  1 INSPECT   the osu! account settings page for application 66562
+             2 IMPLEMENT delete or reset it, update server/.env
+             3 TEST      restart the API, log out, log in again
+             4 DIFF      git status --short must show no change — .env is ignored
+             5 COMMIT    nothing to commit
+             6 VERIFY    confirm .env was not staged
+
+  G2  Error-handling middleware and a 404 catch-all                      [TODO]
+      WHAT   An Express error handler plus a terminal 404 in
+             server/src/index.ts, both answering the {error: string} shape every
+             route already uses.
+      WHY    index.ts ends at the last router, so an unknown /api path and a
+             body-parser failure both escape the {error} contract the client's
+             send() parses — a malformed JSON body becomes an HTML error page
+             before any handler runs.
+      DEPS   none
+      VERIFY curl an unknown /api path -> 404 {"error":...}; POST /api/votes with
+             a malformed body -> 400 {"error":...} rather than HTML.
+      STEPS  1 INSPECT   server/src/index.ts, src/api/client.ts send()
+             2 IMPLEMENT the two handlers, after all routers
+             3 TEST      the two curls above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "fix: keep every API response inside the error contract"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  G3  Rate-limit the write endpoints                                     [TODO]
+      WHAT   A per-account limiter on POST /api/submissions/lookup, POST
+             /api/submissions and POST/DELETE /api/votes.
+      WHY    There is no limiter anywhere. The lookup route calls the osu! API on
+             every request, so an authenticated account can spend the
+             application's quota freely, and vote churn is unbounded.
+      DEPS   none
+      VERIFY hammer lookup past the limit -> 429 with an {error} body; a normal
+             submit and a normal vote are unaffected.
+      STEPS  1 INSPECT   server/src/routes/submissions.ts, routes/votes.ts,
+                         server/src/index.ts
+             2 IMPLEMENT a small in-process limiter keyed on user id (no new
+                         dependency needed for one process)
+             3 TEST      the two checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: rate-limit the write endpoints"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  G4  Production CORS and cookie review                                  [TODO]
+      WHAT   Confirm the deployed configuration: one CLIENT_ORIGIN with
+             credentials, secure cookies under NODE_ENV=production, PUBLIC_BASE_URL
+             and OSU_REDIRECT_URI agreeing with the real host.
+      WHY    Today all of it points at localhost:8443 and the session cookie is
+             only secure when NODE_ENV says production. A first deploy with a
+             mismatched redirect URI is the most common way this login breaks.
+      DEPS   none, but it only matters at deploy time.
+      VERIFY on the deployed host: login completes, the cookie carries Secure and
+             HttpOnly, and a request from another origin is refused.
+      STEPS  1 INSPECT   server/src/index.ts, server/src/session.ts, env.ts
+             2 IMPLEMENT whatever the review turns up; possibly nothing
+             3 TEST      the three checks above against the deployed host
+             4 DIFF      git status --short; git diff
+             5 COMMIT    only if code changed
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  G5  Wire DISCORD_WEBHOOK or drop it                                    [TODO]
+      WHAT   Either post phase and winner announcements to it, or remove it from
+             server/.env.example.
+      WHY    It is declared for "phase / winner announcements" and read by
+             nothing — grep over server/src finds no hits and there is no
+             services/discord.ts. A configured-looking variable that does nothing
+             is a trap for the next person.
+      DEPS   D2 for winner announcements; phase announcements need nothing.
+      VERIFY advance a phase and see the message arrive, or grep the tree and
+             find no mention at all.
+      STEPS  1 INSPECT   server/.env.example, server/src/routes/admin.ts
+             2 IMPLEMENT services/discord.ts and calls, or delete the variable
+             3 TEST      a real phase advance, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: announce phase changes to Discord" (or "chore:
+                         drop the unused DISCORD_WEBHOOK variable")
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  G6  Session revocation                                                 [TODO]
+      WHAT   Some way to invalidate a session before its 30-day expiry — a
+             per-user token version column, or a server-side session store.
+      WHY    server/src/session.ts is a signed stateless cookie with a 30-day
+             TTL, so logout only clears the browser's copy: a stolen cookie stays
+             valid for a month and banning an account (C6) will not end its
+             current session. session.ts argues the scheme is enough "for a site
+             where a session grants one vote per month", and that reasoning is
+             sound today — this item exists so the trade-off is a choice rather
+             than an oversight. Revisit alongside C6.
+      DEPS   C6 makes it matter.
+      VERIFY ban an account mid-session; its very next request is refused.
+      STEPS  1 INSPECT   server/src/session.ts, server/src/middleware/auth.ts
+             2 IMPLEMENT a token version on users, checked in requireAuth
+             3 TEST      the ban check above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: allow sessions to be revoked"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+
+# H. FINAL TESTING AND CLEANUP
+
+  H1  Typecheck scripts in both package.json                             [TODO]
+      WHAT   "typecheck": "tsc --noEmit" in the root and in server/.
+      WHY    Neither has one, so the only way to typecheck is to remember the
+             raw command in two directories. Cheapest item on this list.
+      DEPS   none. Do it first — every other item's TEST step uses it.
+      VERIFY npm run typecheck passes in both directories.
+      STEPS  1 INSPECT   package.json, server/package.json
+             2 IMPLEMENT add the script to both
+             3 TEST      run it in both, then npm run build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "chore: add typecheck scripts"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  H2  A test runner, and the first tests worth having                     [TODO]
+      WHAT   vitest in both packages, then tests for the pure logic that is
+             easiest to break silently: pageAccess and formatCountdown in
+             src/lib/round.ts, toBeatmap and REVIEW_PRESENTATION in
+             src/lib/submission.ts, and the vote route's refusal matrix as
+             supertest cases modelled on the throwaway script already used to
+             verify 1bcad8e.
+      WHY    There is no test runner at all, so every verification so far has
+             been by hand. The vote refusal matrix in particular took a
+             fabricated-account script to prove once and cannot be re-proved
+             cheaply.
+      DEPS   H1
+      VERIFY npm test passes in both packages; deliberately break pageAccess and
+             watch a test fail.
+      STEPS  1 INSPECT   package.json, server/package.json, src/lib/round.ts,
+                         src/lib/submission.ts, server/src/routes/votes.ts
+             2 IMPLEMENT vitest config, the four suites
+             3 TEST      npm test in both, the deliberate break, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "test: add vitest and cover the round and vote logic"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  H3  Delete the dead votingBeatmaps export                               [TODO]
+      WHAT   Remove votingBeatmaps from src/components/platform/sampleData.ts.
+      WHY    Nothing imports it — grep finds only its own declaration. It is also
+             the only place in src/ with non-zero vote counts, so it reads like a
+             live source to anyone skimming and is not one.
+      DEPS   none
+      VERIFY grep src/ for votingBeatmaps returns nothing; build passes.
+      STEPS  1 INSPECT   src/components/platform/sampleData.ts
+             2 IMPLEMENT delete the export
+             3 TEST      the grep, both typechecks, build
+             4 DIFF      git status --short; git diff — one file
+             5 COMMIT    "chore: delete the unused votingBeatmaps fixture"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  H4  Real beatmap search                                                [TODO]
+      WHAT   A search endpoint over the osu! API, and SearchPage reading it
+             instead of searchBeatmaps from sampleData.ts.
+      WHY    src/components/platform/SearchPage.tsx takes no props and calls no
+             API — the whole page is ten fabricated maps. This is a feature, not
+             cleanup, but it is the last sample-data page besides the archive.
+      DEPS   none technically. Lower priority than A-F.
+      VERIFY search a real title and get real results; an empty query and a
+             no-match query both show honest states.
+      STEPS  1 INSPECT   src/components/platform/SearchPage.tsx,
+                         server/src/services/osu.ts, routes/submissions.ts lookup
+             2 IMPLEMENT route, client seam, page rewiring
+             3 TEST      the three checks above, both typechecks, build
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: search beatmaps against the osu! API"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  H5  Drive the sample-data ledger to zero                               [TODO]
+      WHAT   Four seams remain. Close each with its owning item, then confirm
+             sampleData.ts is empty and delete the file:
+               favoriteBeatmaps  -> A4 / A5   (dashboard + submit page)
+               searchBeatmaps    -> H4        (search page)
+               challengeScores   -> E3        (dashboard leaderboard)
+               archiveData       -> F2        (archive page)
+               votingBeatmaps    -> H3        (dead already)
+      WHY    Every one of these renders as though it were real. Tracking them in
+             one place stops a page shipping fiction because nobody remembered.
+      DEPS   A4, E3, F2, H3, H4
+      VERIFY grep -rl sampleData src/ returns nothing, and the file is gone.
+      STEPS  1 INSPECT   src/components/platform/sampleData.ts and its importers
+             2 IMPLEMENT delete the file once the last importer is gone
+             3 TEST      the grep, both typechecks, build, click every page
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "chore: remove the last of the sample data"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  H6  Make the voting happy path testable by hand                    [BLOCKED]
+      WHAT   Get an approved entry into the open round from an account that is
+             not the tester's own.
+      WHY    Right now GET /api/submissions returns zero approved entries, and the
+             only submission that exists (id 2, "Souzou Forest", Heaki) is marked
+             rejected. Even approved, it is the tester's own entry, and self-
+             voting is refused since 1bcad8e — so a successful vote cannot be
+             cast by hand at all. The refusal matrix was proven with fabricated
+             accounts; the happy path has never been clicked.
+      DEPS   BLOCKED BY a second Algerian osu! account submitting, and an
+             administrator approving it.
+      VERIFY log in, cast a vote on that entry, see the count go to 1 and the
+             "Vote cast" pill appear; move the vote; retract it.
+
+
+# DECISIONS SETTLED 2026-09-04
+
+  D1  winner freeze      auto-determine, PENDING admin approval, then permanent
+  B6  vote page          the page as built IS the design; three plan gaps named
+                         and split out as B7, B8, B12; no redesign
+  C2  phase transitions  automatic on the configured end times AND manually
+                         advanceable; server-authoritative; no backwards moves
+  B10 ties               pause in TIEBREAK, an admin picks; never automatic
+  E2  challenge scores   auto-fetch from the osu! API, plus a manual admin path
+  E4  bounty             the challenge prize, default one month of osu!supporter
+  A5  osu! favorites     a button imports them as a second source; token storage
+                         only after the architecture review, which is now in A5
+  B11 ballot secrecy     aggregate totals public, voter-to-map admin-only
+  C5  exceptions         manual admin controls, submit and vote independently
+  A4  favorites          two sources, one UI, never conflated
+
+
+# DECISIONS SETTLED, ROUND TWO
+
+  vote permanence   A validly cast vote is counted permanently. A later voter
+                    block is forward-only; a later submission rejection does not
+                    retroactively discount votes. Only an explicit admin result
+                    correction (D4) ever changes a recorded result.
+  full lifecycle    submission -> voting -> challenge -> archive all advance on the
+                    configured end times, EXCEPT voting -> challenge, which needs
+                    winner approval. Challenge end auto-archives. The next round is
+                    admin-created only, after the archive. Manual advance stays;
+                    backwards moves are refused.
+  A5 token storage  not now. Compare the three designs; "reconnect to osu!" is
+                    preferred unless inspection argues otherwise.
+  admin tabs        audit before deleting anything; name what is obsolete and why.
+  B6                stays DONE. The vote page design is complete and must not be
+                    redesigned.
+  winner_status     PENDING and TIEBREAK stay as winner_status values with the
+                    phase left at 'voting', unless implementation inspection finds
+                    a concrete problem with that model.
+
+
+# QUESTIONS OF FACT, NOT DECISIONS
+
+  - Can the application's client-credentials token read another player's score on
+    a beatmap, or is a user token required? One curl settles it; the command is in
+    E2. Its answer decides whether the A5 token question reaches scores too.
+
+  - Does keeping phase at 'voting' during the pending window mislead any existing
+    consumer? Every reader of phase has to be checked before D2 lands — the nav
+    badge, the countdown past voting_ends_at, the Vote tab's open state, and the
+    dashboard's voting-phase branch are the four to look at first.
+
+
+# STATE OF THE LOCAL INSTANCE, 2026-09-04
+
+Facts, not tasks — but they shape what can be tested.
+
+  - Round 3 (displayed as Round 1, September 2026) is in the submission phase.
+    Submission closes 2026-09-10.
+  - GET /api/submissions returns zero approved entries. Submission 2 exists with
+    reviewStatus 'rejected'; it was 'approved' earlier the same day. Nothing in
+    the voting work or its throwaway test script changes another user's review
+    status, so this reads as a deliberate admin action.
+  - The votes table is empty.
+  - No test runner and no typecheck script in either package: verification is
+    npx tsc --noEmit in both roots plus npm run build, by hand.
+
+
+# DELIBERATELY ABSENT
+
+docs/my_plan.txt:940-947 forbids inventing these. Listed so nobody adds them
+back by accident.
+
+  - points systems. A supplied screenshot shows a "Voted (+75 pts)" button; the
+    ban is newer, and the current code has no points field anywhere.
+  - ranking systems the owner did not specify
+  - vote weighting by osu! rank — users.global_rank is display-only
+  - additional challenge rules
+  - the vote page design — settled: the page as built IS the design (B6), so
+    "do not invent" now means "do not redesign".
+
+
+
+
+
+
+
+
+
+
+
+
+
