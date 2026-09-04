@@ -1,3 +1,269 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECKPOINT — 2026-09-05, end of day. READ THIS FIRST.
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Written so the next session can resume from this file and the repository alone,
+# with no conversation history. Everything below was true at the moment it was
+# written; re-confirm the live state with the commands at the end.
+
+  HEAD      ba7fa1c317f7ec2a7b3b953676dcd6bbff494151
+            ba7fa1c "docs: record what remains and what blocks each item"
+  BRANCH    main
+  TREE      clean — nothing uncommitted, nothing stashed
+  BASELINE  1bcad8e, 23 commits back
+
+  ba7fa1c is the commit every check below was RUN AT. The commit carrying this
+  checkpoint sits directly on top of it and changes documentation only — no source
+  file differs between the two, so the results still hold. `git log -1` tomorrow will
+  show the checkpoint commit, not ba7fa1c.
+
+  VERIFICATION AT THIS COMMIT, all green:
+    npm run typecheck                 PASS
+    cd server && npm run typecheck    PASS
+    npm run build                     PASS
+    npm test                          45 passed (22 client, 23 server)
+    unauthenticated API sweep          28 passed, 0 failed
+
+
+## ITEM STATUS — 48 items (the original 46, plus C8 and C9 surfaced by the C7 audit)
+
+  31 DONE · 13 TODO · 1 IN PROGRESS · 1 BLOCKED · 1 DECIDED · 1 NOT ASKED
+
+  A. SUBMISSION      A1 DONE   A2 DONE   A3 DONE   A4 TODO   A5 TODO
+  B. VOTING          B1 DONE   B2 DONE   B3 DONE   B4 DONE   B5 DONE   B6 DONE
+                     B7 DONE   B8 TODO   B9 TODO   B10 DONE  B11 DONE  B12 DONE
+  C. LIFECYCLE       C1 DONE   C2 DONE   C3 DONE   C4 TODO   C5 TODO
+                     C6 NOT ASKED        C7 IN PROGRESS (audit done, wiring not)
+                     C8 TODO (new)       C9 TODO (new)
+  D. WINNER          D1 DECIDED (implemented by D2 and D3)   D2 DONE   D3 DONE
+                     D4 TODO
+  E. CHALLENGE       E1 DONE   E2 DONE   E3 DONE   E4 DONE
+  F. ARCHIVE         F1 DONE   F2 DONE
+  G. OAUTH/SECURITY  G1 TODO (operational, owner only)       G2 DONE   G3 DONE
+                     G4 DONE   G5 DONE   G6 TODO
+  H. TESTING/CLEANUP H1 DONE   H2 DONE   H3 DONE   H4 TODO   H5 TODO
+                     H6 BLOCKED
+
+  Each item's own entry below carries its full WHAT / WHY / DEPS / VERIFY, what
+  landed, and every decision recorded against it. This table is only the index.
+
+
+## COMMITS SINCE THE BASELINE, newest first
+
+  ba7fa1c  docs: record what remains and what blocks each item
+           The "WHAT REMAINS" section below — 15 open items grouped by what blocks
+           each: eight on a migration, three on a decision, the rest on the owner's
+           account or on work above them.
+  f257811  test: add vitest and cover the round, vote and challenge logic
+           H2. vitest via pnpm, two configs (vitest.client.config.ts,
+           vitest.server.config.ts), 6 test files, 45 tests. Test scripts in both
+           package.json files. Proved the tests bite by breaking pageAccess.
+  7743c1f  test: sweep the API and hand over the authenticated checks
+           verify-authenticated.mjs in the repo root, plus the comprehensive-pass
+           record below. No source changes.
+  54804fa  feat: give administrators a vote moderation view
+           B11. repo/votes.ts listForRound + toApiVoteAudit, GET /api/admin/votes,
+           ApiVoteAudit, and a collapsed Ballot panel in Round Control.
+  1a082f9  feat: rate-limit writes, harden the cookie and CORS config, wire Discord
+           G3 + G4 + G5. middleware/rateLimit.ts; env.ts gained requiredInProduction
+           and useSecureCookies; services/discord.ts and its call sites.
+  5aeffae  fix: show a loading state on the vote page, and drop a dead fixture
+           B12 + H3. VotePage gained a `loading` prop; votingBeatmaps deleted.
+  7105e34  feat: render the archive from real rounds
+           F1 + F2. participantCounts in repo/rounds.ts, GET /api/rounds and
+           /rounds/:id return winner + leaderboard + participants, ArchivePage
+           fetches it, archiveData and the ArchiveEntry/ChallengeScore types deleted.
+  46a8cbc  feat: render the real challenge leaderboard
+           E3. ChallengeLeaderboard and MyChallengeScore read the API; AuthUser
+           gained `id`; the fabricated challengeScores export deleted.
+  1306bc0  feat: give every round a challenge prize by default
+           E4. DEFAULT_REWARD in the admin round route; the prize shown in the round
+           header; the header stops counting down a closed ballot.
+  88e333a  feat: implement challenge scores, fetched from osu! and enterable by hand
+           E1 + E2. repo/challengeScores.ts, routes/challenge.ts,
+           services/osu.ts fetchUserScore, POST /api/admin/challenge/scores,
+           ApiChallengeScore and the api.challenge seam.
+  ce2ca31  docs: settle the osu! token question and audit the admin tabs
+           The A5 token comparison, the E2 score-read answer, the C7 tab audit, and
+           C8/C9. Docs only — no code.
+  1fbb316  fix: stop the nav badge counting down a closed ballot
+  8c60705  feat: advance round phases automatically when due          (C2)
+  61dbe37  feat: show the closed ballot and its winner on the vote page  (B7)
+  acea87f  feat: serve the recorded round winner to the client        (D3)
+  9232dbc  feat: approve the winner from the admin dashboard          (D2 UI)
+  84e7a1e  feat: record a pending winner when voting closes           (D2 server)
+  20c6b04  feat: let a submitter withdraw their entry                 (A3)
+  4838c7f  fix: keep every API response inside the error contract     (G2)
+  3afcd34  docs: record the frozen-ballot rule and the vote page's closed states
+  e8b68e5  fix: refuse backwards round phase transitions              (C3)
+  3b3f9ce  chore: add typecheck scripts to both packages              (H1)
+  60e8b28  docs: add the master roadmap and record the owner's decisions
+
+
+## LIVE STATE — round, database, and what has actually been exercised
+
+  Read from the running API at 2026-09-05 00:30. Re-check it tomorrow; the owner has
+  been driving the app between sessions and it has moved every time.
+
+  ROUND       id 3, displayed as "Round 1 · September 2026"
+              phase        challenge
+              winnerStatus official, approved 2026-09-04T20:52:16Z
+              winner       submission 2 — Kano, "Souzou Forest" [Expert]
+                           mod HD, requirement "Lowest Miss Count"
+              tally        winnerVoteCount 0, totalVotes 0 — the ballot was closed
+                           with NO votes cast and exactly ONE approved entry, so it
+                           went through the PENDING path: one leader, not a tie.
+                           THE TIEBREAK PATH HAS NOT BEEN EXERCISED with real data.
+                           It needs two or more approved entries level at the top,
+                           which includes two entries and no votes at all.
+              reward       '' — this round predates E4's default, so the hero reads
+                           "To be announced". Correct, not a bug.
+              schedule     submission ends 2026-09-10, voting 2026-09-13,
+                           challenge 2026-10-04 (all still in the future, so the C2
+                           clock has nothing due and is a no-op right now)
+
+  SUBMISSIONS 1 approved (id 2, the winner above). Nothing pending.
+  VOTES       empty.
+  CHALLENGE   1 score, and it is REAL END-TO-END PROOF of E1+E2:
+                Heaki (osu 18844163), 32,502,940, 97.54%, 0 misses, HD,
+                qualified true, osuScoreId 5069480246, at 2026-09-04T23:33:04Z
+              osuScoreId is non-null, so it came through the osu! API import path
+              rather than the manual admin one. It confirms fetchUserScore against
+              the live API, the 0..1 → percentage accuracy conversion, the mods
+              normalisation, and qualifies() agreeing with a real play.
+  ARCHIVE     0 ended rounds, so the archive page shows its empty state. The
+              non-empty archive path has NOT been seen with real data.
+  MIGRATIONS  All four applied. Evidenced without touching the migration tool:
+              /rounds/current returns the 004 winner columns, and /challenge/scores
+              reads the 002 table without a 503. There is no 005 yet.
+
+
+## NEXT RECOMMENDED ORDER
+
+  Eight of the thirteen TODO items each need one migration, and only the owner
+  applies DDL. So the cheapest path by far is ONE migration covering all of them,
+  handed over once, then the code for each behind it.
+
+  STEP 1  Write server/migrations/005_*.sql covering, in dependency order:
+            C4  allowed_countries        (country char(2) PK, enabled bool, added_by)
+            C5  participant_permissions  (user_id PK, can_submit, can_vote, note,
+                                          set_by, set_at)
+            A4  favorites                (user_id, difficulty_id, source 'dz'|'osu',
+                                          PK on all three so the two sources never
+                                          collide — the A4 decision)
+            B9  votes.updated_at
+            D4  the winner-correction audit columns or table
+            G6  the session revocation store
+            C8  the beatmap-rules settings store — BUT SEE THE DECISION BELOW; do
+                not include this until the owner answers global-vs-per-round
+          Then hand over ONE command and stop:
+            cd C:\\Users\\heaki\\Desktop\\newdz\\server
+            pnpm run migrate:status     # 005 should read as pending
+            pnpm run migrate
+
+  STEP 2  Implement in this order, one commit each, once 005 is applied:
+            C4 → C5      both land in the same admin tab and the same eligibility
+                         read; C5 depends on C4
+            C7 phase two eligibility and users tabs become real once C4 and C5 exist;
+                         the config tab still needs the owner decision below
+            A4 → A5      A5 needs A4's store and NOTHING else — the token question is
+                         settled, the app token reads public favourites
+            H5           favoriteBeatmaps can be deleted the moment A4 lands
+            B9, D4, G6   independent of each other, lowest urgency
+            B8           comments; a whole feature, needs its own migration if not
+                         batched into 005
+
+  STEP 3  H4, real beatmap search. The ONE open item that needs no migration and no
+          decision — it can be started at any time, including first if the owner
+          would rather not wait on DDL. Needs an osu! search endpoint plus a page's
+          worth of wiring, and it unblocks the second half of H5.
+
+
+## KNOWN ISSUES, SKIPPED TESTS, AND WHAT NEEDS THE OWNER
+
+  NEEDS A DECISION — nothing else in the roadmap is waiting on the owner
+    1  The config admin tab. Site name, "Max Submissions Per User / Round", and
+       maintenance mode correspond to nothing in my_plan.txt or this roadmap, and the
+       server allows exactly one entry per user per round through a unique
+       constraint, so that input is not a setting that exists. Build them, or delete
+       those three controls? (This is the only question the C7 audit produced.)
+    2  C8: administrator-defined beatmap rules — global settings, or per-round? The
+       answer changes the shape of the table, so 005 should not include it until this
+       is answered.
+    3  Whether non-Algerian players may compete in the challenge. POST
+       /api/challenge/scores currently uses requireEligible, the same gate as
+       submitting and voting. That was an ASSUMPTION, not a decision — nothing in
+       my_plan.txt says. If they should be able to, that one middleware becomes
+       requireAuth and nothing else changes.
+
+  NEEDS THE OWNER'S MACHINE OR ACCOUNT
+    4  G1: delete osu! application 66562. Less urgent than it reads — server/.env is
+       already on OSU_CLIENT_ID=67250 and that application authenticates fine, so the
+       rotation is done. Deleting the old app is what remains.
+    5  Run the authenticated verification, which cannot be done without a session:
+         node verify-authenticated.mjs "<osudz_session cookie value>"
+       Read-only unless --allow-writes.
+
+  NOT VERIFIED, each with its reason
+    6  Every authenticated path. No way to forge a session here; see item 5.
+    7  The C2 deadline behaviour. Nothing is due on this instance, so the clock was
+       confirmed only as a no-op. Testing it needs an admin session and PATCH
+       /api/admin/round/phase with endsAt — NOT a hand-written UPDATE.
+    8  Any page but the dashboard in a browser. THE APP HAS NO URL ROUTING:
+       platformPage is React state with no history sync, so /vote and /archive are
+       not addressable and a headless browser cannot reach them. This is also a
+       product gap — nobody can link or bookmark a page — and it is flagged for the
+       owner rather than fixed, since routing was never asked for.
+    9  A live Discord announcement. DISCORD_WEBHOOK is set, but firing one means
+       advancing a real phase.
+   10  The archive with real content. No round has ended yet, so only its empty state
+       has been seen.
+
+  DELIBERATELY NOT WRITTEN, not forgotten
+   11  The vote refusal matrix as supertest cases (part of H2's original WHAT). It
+       needs a live database and a forged session; verify-authenticated.mjs covers
+       that ground with a real session instead, which is both safer and closer to
+       what ships.
+
+  TRAPS FOR THE NEXT SESSION
+   12  THIS REPO IS pnpm. `npm install` fails on it with EUNSUPPORTEDPROTOCOL over a
+       workspace:* reference. Use `pnpm add -D <pkg>`. (`npm run <script>` is fine.)
+   13  server/ is NodeNext: every relative import, test files included, must end in
+       '.js' even though the file on disk is '.ts'. vitest.server.config.ts carries a
+       resolver plugin for that; tsc enforces it.
+   14  Unit tests must never read server/.env. vitest.server.config.ts supplies fixed
+       placeholder env values, because services/osu.ts imports env.ts, which validates
+       at module load and exits the process on a missing variable.
+   15  Do not run the full project-wide verification after every item — the owner
+       asked for focused commits and one comprehensive pass at the end. Typechecks
+       per item, everything else at the end.
+
+
+## COMMANDS FOR TOMORROW
+
+  From C:\\Users\\heaki\\Desktop\\newdz
+
+    git log -1 --oneline          # expect ba7fa1c
+    git status --short            # expect empty
+    npm run typecheck             # client
+    cd server && npm run typecheck && cd ..
+    npm test                      # expect 22 + 23 passing
+    npm run build
+
+  To bring the app up, if it is not already running:
+    cd server && pnpm run dev     # API on :3001
+    pnpm run dev                  # client on :8443, from the repo root
+
+  If the key that changed was OSU_CLIENT_SECRET rather than an unrelated one,
+  restart the API afterwards and confirm:
+    curl http://localhost:3001/api/health
+  then log out and back in once, since the app token is cached in memory.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# END OF CHECKPOINT — the roadmap proper begins below.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 # osu!dz — MASTER TODO
 
 Baseline: commit 1bcad8e ("feat: implement server-authoritative voting and
