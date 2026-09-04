@@ -8,6 +8,7 @@ import {
   Shield, ChevronRight, CheckCircle2, Circle, Clock,
   Star, Music2, AlertCircle, Users, Settings, Zap,
   ToggleLeft, ToggleRight, Plus, X, Globe, Inbox, Link as LinkIcon,
+  Trophy, Scale,
 } from 'lucide-react';
 
 // ── TAB TYPES ────────────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ function Section({ title, description, children }: { title: string; description?
   );
 }
 
-// ── ROUND CONTROL ─────────────────────────────────────────────────────────────
+// ── PHASE TABLE & BANNERS ───────────────────────────────────────────────────────────
 
 const PHASES: { key: Phase; label: string; color: string }[] = [
   { key: 'submission', label: 'Submission', color: 'text-amber-400' },
@@ -65,6 +66,192 @@ function Banner({ tone, text, onDismiss }: { tone: 'error' | 'ok'; text: string;
     </div>
   );
 }
+
+// ── WINNER APPROVAL ───────────────────────────────────────────────────────────
+//
+// The window between the ballot closing and the winner being official. The round is
+// still in the 'voting' phase throughout — winner_status is what closed the ballot,
+// not the phase — and this panel is the only way out of it: POST /admin/round/winner
+// is the sole path to the challenge phase, because NEXT_PHASES deliberately omits
+// voting → challenge so the generic phase endpoint cannot skip the approval.
+
+/** One entry in the winner panel — the pending winner, or a tied candidate. */
+function WinnerEntry({ id, entry }: { id: number; entry: ApiSubmission | null }) {
+  return (
+    <div className="flex items-center gap-3 min-w-0 flex-1">
+      {entry?.coverUrl && (
+        <img
+          src={entry.coverUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          className="w-20 h-12 rounded-lg object-cover flex-shrink-0 bg-slate-900"
+        />
+      )}
+      <div className="min-w-0 text-left">
+        <p className="text-sm font-bold text-white truncate">
+          {entry ? entry.title : `Submission #${id}`}
+        </p>
+        <p className="text-xs text-slate-400 truncate">
+          {entry
+            ? `${entry.artist} · [${entry.difficultyName}] · submitted by ${entry.submittedByName}`
+            : 'No longer listed in this round — approve with care.'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function WinnerPanel({
+  round,
+  onRoundChange,
+}: {
+  round: CurrentRound;
+  onRoundChange: () => void | Promise<void>;
+}) {
+  const tiebreak = round.winnerStatus === 'tiebreak';
+  const [entries, setEntries] = useState<ApiSubmission[]>([]);
+  const [tied, setTied] = useState<number[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [choice, setChoice] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The round carries ids; the titles come from the admin submission list, which is
+  // the one read that returns every entry of the round rather than only approved ones.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const [rows, ids] = await Promise.all([
+        api.admin.submissions(),
+        tiebreak ? api.admin.tiebreakEntries() : Promise.resolve<number[]>([]),
+      ]);
+      if (!live) return;
+      setEntries(rows ?? []);
+      setTied(ids ?? []);
+      setLoaded(true);
+    })();
+    return () => { live = false; };
+  }, [round.id, tiebreak]);
+
+  const entryFor = (id: number) => entries.find((e) => e.id === id) ?? null;
+
+  const approve = async () => {
+    setBusy(true);
+    setError(null);
+    const result = await api.admin.approveWinner(tiebreak ? (choice ?? undefined) : undefined);
+    if (!result.ok) {
+      setError(result.status === 0 ? result.error : `${result.error} (HTTP ${result.status})`);
+      setBusy(false);
+      return;
+    }
+    // Approving moves the round to the challenge phase, which unmounts this panel, so
+    // only the failure path puts the button back.
+    await onRoundChange();
+  };
+
+  const permanence = (
+    <p className="text-[11px] text-slate-600">
+      Approving records the winner permanently and starts the challenge phase. It cannot be
+      undone from here.
+    </p>
+  );
+
+  if (tiebreak) {
+    return (
+      <Section
+        title="Voting ended in a tie"
+        description={`Level on ${round.winnerVoteCount ?? 0} votes${
+          round.totalVotes === null ? '' : ` of ${round.totalVotes} cast`
+        }. A tie is not resolved automatically — pick the winner.`}
+      >
+        {error && <Banner tone="error" text={error} onDismiss={() => setError(null)} />}
+
+        {!loaded ? (
+          <p className="text-sm text-slate-500">Loading the tied entries…</p>
+        ) : tied.length === 0 ? (
+          <p className="text-sm text-rose-400">
+            This round is marked tied but no candidates came back. Reload — if that does not fix
+            it, the round_tiebreak_entries rows are missing and the winner cannot be chosen here.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {tied.map((id) => (
+              <button
+                key={id}
+                type="button"
+                disabled={busy}
+                onClick={() => setChoice(id)}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all disabled:opacity-50 ${
+                  choice === id
+                    ? 'bg-amber-400/10 border-amber-400/40'
+                    : 'bg-slate-900/40 border-slate-800/70 hover:border-slate-700'
+                }`}
+              >
+                {choice === id
+                  ? <CheckCircle2 className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  : <Circle className="w-4 h-4 text-slate-600 flex-shrink-0" />}
+                <WinnerEntry id={id} entry={entryFor(id)} />
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={busy || choice === null}
+          onClick={() => { void approve(); }}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm bg-purple-500 hover:bg-purple-400 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Scale className="w-4 h-4" />
+          {busy ? 'Approving…' : choice === null ? 'Select the winning entry' : 'Approve Winner & Start Challenge'}
+        </button>
+        {permanence}
+      </Section>
+    );
+  }
+
+  const winner = round.winningSubmissionId;
+
+  return (
+    <Section
+      title="Winner pending approval"
+      description="The ballot is closed and the totals are frozen. The winner is not official, and the challenge does not start, until you approve it."
+    >
+      {error && <Banner tone="error" text={error} onDismiss={() => setError(null)} />}
+
+      {winner === null ? (
+        <p className="text-sm text-rose-400">
+          Voting is closed but no winning entry is recorded. This should not happen — a closed
+          round is either pending with one entry or tied with several.
+        </p>
+      ) : (
+        <div className="flex items-center gap-3 p-3 bg-slate-900/40 border border-slate-800/70 rounded-xl">
+          <Trophy className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          <WinnerEntry id={winner} entry={loaded ? entryFor(winner) : null} />
+          <div className="text-right flex-shrink-0">
+            <p className="text-sm font-black font-mono text-amber-400">{round.winnerVoteCount ?? 0}</p>
+            <p className="text-[10px] uppercase tracking-wider text-slate-600 font-mono">
+              of {round.totalVotes ?? 0} cast
+            </p>
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        disabled={busy || winner === null}
+        onClick={() => { void approve(); }}
+        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm bg-purple-500 hover:bg-purple-400 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        <Trophy className="w-4 h-4" />
+        {busy ? 'Approving…' : 'Approve Winner & Start Challenge'}
+      </button>
+      {permanence}
+    </Section>
+  );
+}
+
+// ── ROUND CONTROL ─────────────────────────────────────────────────────────────
 
 function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; onRoundChange: () => void | Promise<void> }) {
   const [busy, setBusy] = useState(false);
@@ -103,6 +290,25 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
     setBusy(false);
   };
 
+  // Closing the ballot does not advance the phase. The round stays in 'voting' with
+  // the winner pending or tied, and only WinnerPanel below can move it on — counting
+  // and freezing the totals happen server-side in one transaction.
+  const closeBallot = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    const result = await api.admin.closeVoting();
+    if (result.ok) {
+      setNotice(
+        result.data.tied.length > 1
+          ? `Voting closed level between ${result.data.tied.length} entries — pick the winner below.`
+          : 'Voting closed. The leading entry is waiting for your approval below.'
+      );
+    } else setError(describe(result));
+    await onRoundChange();
+    setBusy(false);
+  };
+
   // Ending a round and opening the next are two writes: rounds_single_open means
   // one row cannot be both ended and open. If the second call fails the round is
   // closed with nothing open, which the "Open a Round" form below recovers.
@@ -137,7 +343,7 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
 
   const nextActions: Record<Phase, { label: string; color: string; run: () => Promise<void> }> = {
     submission: { label: 'Close Submissions & Start Voting', color: 'bg-blue-500 hover:bg-blue-400 text-white',       run: () => advance('voting') },
-    voting:     { label: 'Close Voting & Start Challenge',   color: 'bg-purple-500 hover:bg-purple-400 text-white',   run: () => advance('challenge') },
+    voting:     { label: 'Close Voting & Count the Ballot',  color: 'bg-amber-400 hover:bg-amber-300 text-slate-950',  run: closeBallot },
     challenge:  { label: 'Archive Round & Open the Next',    color: 'bg-amber-400 hover:bg-amber-300 text-slate-950', run: archiveAndOpenNext },
   };
 
@@ -164,6 +370,9 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
   );
 
   const phaseIdx = round ? PHASES.findIndex((p) => p.key === round.phase) : -1;
+  // The ballot closes on winner_status, not on the phase, so a round in 'voting'
+  // with a winner pending has no phase action left — approving one is the only move.
+  const ballotClosed = round?.phase === 'voting' && round.winnerStatus !== 'none';
 
   return (
     <div className="space-y-5">
@@ -172,7 +381,14 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
 
       {round ? (
         <>
-          <Section title="Phase Timeline" description={`${roundLabel(round)} — this phase ends in ${countdown}.`}>
+          <Section
+            title="Phase Timeline"
+            description={
+              ballotClosed
+                ? `${roundLabel(round)} — the ballot is closed and the totals are frozen.`
+                : `${roundLabel(round)} — this phase ends in ${countdown}.`
+            }
+          >
             {/* Phase progress */}
             <div className="flex items-center gap-0">
               {PHASES.map((p, i) => (
@@ -196,20 +412,35 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
               ))}
             </div>
 
-            {/* Action button */}
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => { void nextActions[round.phase].run(); }}
-              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${nextActions[round.phase].color}`}
-            >
-              <ChevronRight className="w-4 h-4" />
-              {busy ? 'Working…' : nextActions[round.phase].label}
-            </button>
-            <p className="text-[11px] text-slate-600 text-center">
-              This change is immediate and visible to all users. There is no confirmation.
-            </p>
+            {/* Action button — absent once the ballot is closed, because approving the
+                winner is then the only way forward and WinnerPanel owns that. */}
+            {ballotClosed ? (
+              <div className="flex items-start gap-2.5 bg-blue-500/8 border border-blue-500/20 rounded-xl px-4 py-3">
+                <Trophy className="w-4 h-4 text-blue-400 flex-shrink-0 mt-px" />
+                <p className="text-xs text-blue-300/90">
+                  Voting is closed — nobody can cast or retract a vote. The round leaves the
+                  voting phase only when you approve the winner below.
+                </p>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => { void nextActions[round.phase].run(); }}
+                  className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${nextActions[round.phase].color}`}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                  {busy ? 'Working…' : nextActions[round.phase].label}
+                </button>
+                <p className="text-[11px] text-slate-600 text-center">
+                  This change is immediate and visible to all users. There is no confirmation.
+                </p>
+              </>
+            )}
           </Section>
+
+          {ballotClosed && <WinnerPanel round={round} onRoundChange={onRoundChange} />}
 
           <Section
             title="Schedule"

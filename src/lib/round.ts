@@ -22,6 +22,17 @@ export interface CurrentRound {
   endsAt: string | null;
   /** All three scheduled ends, for the admin schedule view. */
   schedule: Record<Phase, string | null>;
+  /**
+   * How far the winner has got. The phase stays 'voting' while this is 'pending' or
+   * 'tiebreak', so this — not the phase — says whether the ballot is still open.
+   */
+  winnerStatus: ApiRound['winnerStatus'];
+  /** Null until the winner is determined, and while a tie is unresolved. */
+  winningSubmissionId: number | null;
+  /** Frozen when voting closed. On a tie, the count every tied entry reached. */
+  winnerVoteCount: number | null;
+  /** Votes cast in the round, frozen alongside winnerVoteCount. */
+  totalVotes: number | null;
 }
 
 const LIVE_PHASES: readonly Phase[] = ['submission', 'voting', 'challenge'];
@@ -52,6 +63,10 @@ export function toCurrentRound(round: ApiRound | null): CurrentRound | null {
     reward: round.reward,
     endsAt: schedule[round.phase],
     schedule,
+    winnerStatus: round.winnerStatus,
+    winningSubmissionId: round.winningSubmissionId,
+    winnerVoteCount: round.winnerVoteCount,
+    totalVotes: round.totalVotes,
   };
 }
 
