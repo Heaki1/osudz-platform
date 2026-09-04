@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { ApiRound } from '../api/client';
-import { Phase } from '../types';
+import { Phase, PlatformPage } from '../types';
 
 export interface CurrentRound {
   id: number;
@@ -98,3 +98,52 @@ export function useCountdown(endsAt: string | null | undefined): string {
 
   return formatCountdown(endsAt, now);
 }
+
+// ── PHASE-GATED PAGE ACCESS ──────────────────────────────────────────────────
+//
+// One table decides which pages are live in which phase, because two of them used
+// to disagree. The submit page carried its own private "closed" component with a
+// hardcoded next round in it, while the vote page had no gate at all — it rendered
+// in every phase and printed the label "Voting Phase" whatever the round was doing.
+// The nav reads the same table, so a tab and the page behind it cannot tell
+// different stories.
+
+/** The phase each page is interactive in. A page absent from here is always open. */
+export const PAGE_PHASE: Partial<Record<PlatformPage, Phase>> = {
+  submit: 'submission',
+  vote: 'voting',
+};
+
+/** Where to send someone when the page they asked for is not the live one. */
+export const PHASE_LANDING: Record<Phase, PlatformPage> = {
+  submission: 'submit',
+  voting: 'vote',
+  challenge: 'dashboard',
+};
+
+export type PageAccess =
+  | { state: 'open' }
+  | { state: 'no-round'; required: Phase }
+  | { state: 'early'; required: Phase; actual: Phase }
+  | { state: 'closed'; required: Phase; actual: Phase };
+
+/**
+ * Whether `page` is live for `round`. 'early' and 'closed' are distinguished by
+ * LIVE_PHASES order so the panel can say which way the round has moved; an ended
+ * round arrives here as null, because toCurrentRound has already collapsed it.
+ */
+export function pageAccess(page: PlatformPage, round: CurrentRound | null): PageAccess {
+  const required = PAGE_PHASE[page];
+  if (!required) return { state: 'open' };
+  if (!round) return { state: 'no-round', required };
+  if (round.phase === required) return { state: 'open' };
+
+  const isEarly = LIVE_PHASES.indexOf(round.phase) < LIVE_PHASES.indexOf(required);
+  return isEarly
+    ? { state: 'early', required, actual: round.phase }
+    : { state: 'closed', required, actual: round.phase };
+}
+
+/** pageAccess for callers that only need the yes/no — the nav, mainly. */
+export const isPageOpen = (page: PlatformPage, round: CurrentRound | null): boolean =>
+  pageAccess(page, round).state === 'open';

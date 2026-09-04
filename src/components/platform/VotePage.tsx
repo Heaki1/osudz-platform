@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { BeatmapCard } from '../BeatmapCard';
-import { Beatmap } from '../../types';
-import { CurrentRound, roundLabel, useCountdown } from '../../lib/round';
-import { AuthUser } from './NavHeader';
-import { Crown, Trophy, ChevronRight, LogIn, X } from 'lucide-react';
+import { Beatmap, PlatformPage } from '../../types';
+import { CurrentRound, pageAccess, roundLabel, useCountdown } from '../../lib/round';
+import { AuthUser, phaseConfig } from './NavHeader';
+import { PhaseGate } from './PhaseGate';
+import { Crown, Trophy, ChevronRight, LogIn, X, AlertCircle, Ban } from 'lucide-react';
 
 // ── LOGIN MODAL ───────────────────────────────────────────────────────────────
 
@@ -44,7 +45,9 @@ function LoginModal({ onClose, onLogin }: { onClose: () => void; onLogin?: () =>
 
 function VoteStandings({ maps, votedId }: { maps: Beatmap[]; votedId: string | null }) {
   const sorted = [...maps].sort((a, b) => (b.voteCount ?? 0) - (a.voteCount ?? 0));
-  const maxVotes = sorted[0]?.voteCount ?? 1;
+  // Math.max, not `?? 1`: with a list of entries that all have zero votes the leader's
+  // count is 0, and dividing by it printed "NaN%" and a `width: NaN%` bar.
+  const maxVotes = Math.max(1, sorted[0]?.voteCount ?? 0);
 
   return (
     <div className="bg-[#0d1526] border border-slate-800 rounded-2xl overflow-hidden">
@@ -99,22 +102,63 @@ function VoteStandings({ maps, votedId }: { maps: Beatmap[]; votedId: string | n
   );
 }
 
+// ── VOTE ERROR BANNER ────────────────────────────────────────────────────────
+
+function VoteError({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  return (
+    <div className="flex items-start gap-2.5 bg-rose-500/10 border border-rose-500/25 rounded-xl px-4 py-3 mb-6">
+      <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+      <p className="text-xs text-rose-300 flex-1">{text}</p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="opacity-60 hover:opacity-100 transition-opacity flex-shrink-0"
+      >
+        <X className="w-3.5 h-3.5 text-rose-300" />
+      </button>
+    </div>
+  );
+}
+
 // ── VOTE PAGE ─────────────────────────────────────────────────────────────────
 
 interface VotePageProps {
   maps: Beatmap[];
   round: CurrentRound | null;
+  /** The caller's own entry. Voting for it is refused by the server, so it is refused here too. */
+  mySubmissionId: number | null;
+  /** Beatmap id whose cast or retract is in flight. */
+  voteBusy: string | null;
+  voteError: string | null;
+  onDismissVoteError: () => void;
   playingId: string | null;
   audioProgress: (id: string) => number;
   onTogglePlay: (id: string) => void;
   onScrub: (id: string, e: React.MouseEvent<HTMLDivElement>) => void;
   onVote: (id: string) => void;
   onFavorite: (id: string) => void;
+  onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
 }
 
-export function VotePage({ maps, round, playingId, audioProgress, onTogglePlay, onScrub, onVote, onFavorite, user, onLogin }: VotePageProps) {
+export function VotePage({
+  maps,
+  round,
+  mySubmissionId,
+  voteBusy,
+  voteError,
+  onDismissVoteError,
+  playingId,
+  audioProgress,
+  onTogglePlay,
+  onScrub,
+  onVote,
+  onFavorite,
+  onNavigate,
+  user,
+  onLogin,
+}: VotePageProps) {
   const sorted = [...maps].sort((a, b) => (b.voteCount ?? 0) - (a.voteCount ?? 0));
   const leader = sorted[0];
   const totalVotes = maps.reduce((s, m) => s + (m.voteCount ?? 0), 0);
@@ -124,10 +168,85 @@ export function VotePage({ maps, round, playingId, audioProgress, onTogglePlay, 
   const countdown = useCountdown(round?.endsAt);
   const visibleMaps = showAll ? sorted : sorted.slice(0, 6);
 
+  // Whether this page is live at all comes from the one table in lib/round.ts, so the
+  // nav tab, this body and the server's phase check cannot disagree.
+  const access = pageAccess('vote', round);
+  const canVote = user?.canVote ?? false;
+  // Beatmap ids are strings; submission ids are numbers.
+  const myMapId = mySubmissionId === null ? null : String(mySubmissionId);
+  const ownEntryListed = myMapId !== null && sorted.some((m) => m.id === myMapId);
+
+  /** Why this entry cannot be voted for, or undefined when it can. */
+  const refusal = (id: string): string | undefined => {
+    if (!user) return undefined; // A guest gets the login modal instead of a refusal.
+    if (!canVote) return 'Voting is available to Algerian osu! players';
+    if (id === myMapId) return 'You cannot vote for your own submission';
+    return undefined;
+  };
+
   const handleVoteAttempt = (id: string) => {
     if (!user) { setShowLoginModal(true); return; }
     onVote(id);
   };
+
+  // The phase label comes from the same table the nav badge reads. This page used to
+  // print "Voting Phase" whatever the round was doing, including with no round at all.
+  const header = (
+    <div className="mb-8">
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <span
+          className={`text-[10px] font-black tracking-widest font-mono uppercase ${
+            round ? phaseConfig[round.phase].color : 'text-slate-500'
+          }`}
+        >
+          {round ? phaseConfig[round.phase].label : 'No active round'}
+        </span>
+        {round && (
+          <>
+            <span className="text-slate-700">·</span>
+            <span className="text-[10px] text-slate-500 font-mono">{roundLabel(round)}</span>
+            <span className="text-slate-700">·</span>
+            <span className="text-[10px] text-slate-500 font-mono">Ends in {countdown}</span>
+          </>
+        )}
+      </div>
+      <h1 className="text-2xl font-black text-white mb-2 tracking-tight">Vote for the Monthly Challenge</h1>
+      <p className="text-sm text-slate-400 max-w-2xl">
+        Algerian osu! players get one vote. Flip a card to see challenges. The beatmap with the most votes becomes this month's challenge.
+      </p>
+    </div>
+  );
+
+  // Outside the voting phase the page keeps its header and swaps the body, the way the
+  // submit page does, so a reader still knows where they are.
+  if (access.state !== 'open') {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-8 pb-16">
+        {header}
+        <PhaseGate access={access} round={round} onNavigate={onNavigate} />
+      </div>
+    );
+  }
+
+  if (maps.length === 0) {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-8 pb-16">
+        {header}
+        <div className="flex flex-col items-center gap-4 py-20 text-center">
+          <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center">
+            <Trophy className="w-7 h-7 text-slate-700" />
+          </div>
+          <div>
+            <p className="text-white font-bold mb-1">Nothing to vote on yet</p>
+            <p className="text-sm text-slate-500 max-w-md">
+              No entry has been approved for this round. Approved beatmaps show up here as
+              soon as an administrator lets one through.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8 pb-16">
@@ -137,20 +256,9 @@ export function VotePage({ maps, round, playingId, audioProgress, onTogglePlay, 
           onLogin={() => { onLogin?.(); setShowLoginModal(false); }}
         />
       )}
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-3 flex-wrap">
-          <span className="text-[10px] font-black tracking-widest text-blue-400 font-mono uppercase">Voting Phase</span>
-          <span className="text-slate-700">·</span>
-          <span className="text-[10px] text-slate-500 font-mono">{roundLabel(round)}</span>
-          <span className="text-slate-700">·</span>
-          <span className="text-[10px] text-slate-500 font-mono">Ends in {countdown}</span>
-        </div>
-        <h1 className="text-2xl font-black text-white mb-2 tracking-tight">Vote for the Monthly Challenge</h1>
-        <p className="text-sm text-slate-400 max-w-2xl">
-          Algerian osu! players get one vote. Flip a card to see challenges. The beatmap with the most votes becomes this month's challenge.
-        </p>
-      </div>
+      {header}
+
+      {voteError && <VoteError text={voteError} onDismiss={onDismissVoteError} />}
 
       {/* Stats + vote status */}
       <div className="flex items-center gap-4 mb-8 flex-wrap">
@@ -182,6 +290,13 @@ export function VotePage({ maps, round, playingId, audioProgress, onTogglePlay, 
               <p className="text-[10px] text-emerald-400/60 truncate max-w-[160px]">{votedMap.title}</p>
             </div>
           </div>
+        ) : user && !canVote ? (
+          <div className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5">
+            <Ban className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+            <p className="text-xs font-bold text-slate-400">
+              Voting is available to Algerian osu! players.
+            </p>
+          </div>
         ) : (
           <div className="flex items-center gap-2 bg-amber-400/8 border border-amber-400/20 rounded-xl px-4 py-2.5">
             <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
@@ -199,6 +314,12 @@ export function VotePage({ maps, round, playingId, audioProgress, onTogglePlay, 
             <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">All Submissions</h2>
             <span className="text-[10px] text-slate-600 font-mono">{maps.length} beatmaps</span>
           </div>
+
+          {ownEntryListed && (
+            <p className="text-[11px] text-slate-600 -mt-2 mb-4">
+              Your own entry is in this list and cannot be voted for.
+            </p>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
             {visibleMaps.map((beatmap) => {
@@ -220,6 +341,9 @@ export function VotePage({ maps, round, playingId, audioProgress, onTogglePlay, 
                     onVote={() => handleVoteAttempt(beatmap.id)}
                     onFavorite={() => onFavorite(beatmap.id)}
                     onOpenComments={() => {}}
+                    voteBusy={voteBusy === beatmap.id}
+                    voteDisabled={refusal(beatmap.id) !== undefined}
+                    voteDisabledReason={refusal(beatmap.id)}
                   />
                 </div>
               );

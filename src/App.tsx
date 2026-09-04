@@ -18,6 +18,7 @@ const toAuthUser = (u: ApiUser): AuthUser => ({
   rank: u.globalRank,
   country: u.country,
   isAdmin: u.isAdmin,
+  canVote: u.canVote,
 });
 
 export default function App() {
@@ -27,6 +28,11 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [maps, setMaps] = useState<Beatmap[]>([]);
   const [mySubmission, setMySubmission] = useState<ApiSubmission | null>(null);
+  /** Submission id the caller voted for in the open round, or null. */
+  const [myVote, setMyVote] = useState<number | null>(null);
+  /** Beatmap id whose cast or retract is in flight, so one click at a time. */
+  const [voteBusy, setVoteBusy] = useState<string | null>(null);
+  const [voteError, setVoteError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [playState, setPlayState] = useState<PlayState | null>(null);
 
@@ -35,19 +41,24 @@ export default function App() {
   // their actual behaviour off `round` being null.
   const phase: Phase = round?.phase ?? 'submission';
 
-  // Round, approved submissions and the caller's own entry travel together:
-  // approving an entry or advancing a phase changes all three, so admin actions
-  // reload the set. /submissions/mine answers null when signed out, so it is safe
-  // to ask for before the session is known.
+  // Round, approved submissions, the caller's own entry and the caller's vote travel
+  // together: approving an entry, casting a vote or advancing a phase changes several
+  // of them at once, so everything reloads as a set. The two per-caller reads answer
+  // 401 when signed out and client.ts maps a failed read to null, so asking for them
+  // before the session is known is safe.
   const refresh = useCallback(async () => {
-    const [current, submissions, mine] = await Promise.all([
+    const [current, submissions, mine, vote] = await Promise.all([
       api.rounds.current(),
       api.submissions.list(),
       api.submissions.mine(),
+      api.votes.my(),
     ]);
+    // isVoted is per-caller, so it is applied here rather than in toBeatmap.
+    const votedId = vote?.submissionId ?? null;
     setRound(toCurrentRound(current));
-    setMaps((submissions ?? []).map(toBeatmap));
+    setMaps((submissions ?? []).map((s) => ({ ...toBeatmap(s), isVoted: s.id === votedId })));
     setMySubmission(mine);
+    setMyVote(votedId);
     setLoaded(true);
   }, []);
 
@@ -114,15 +125,33 @@ export default function App() {
     });
   };
 
-  // Local-only until POST /api/votes is implemented server-side.
-  const handleVote = (id: string) => {
-    setMaps((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? { ...m, isVoted: !m.isVoted, voteCount: (m.voteCount ?? 0) + (m.isVoted ? -1 : 1) }
-          : m
-      )
-    );
+  /**
+   * One vote per round, enforced by the server and by votes_one_per_user_per_round.
+   * Clicking the entry you already voted for withdraws it; clicking another moves the
+   * vote, which POST /api/votes does as one upsert rather than a retract-then-cast
+   * that could leave someone with no vote at all if the second call failed.
+   *
+   * The whole set is reloaded on success instead of patching one row, because a move
+   * changes two counts and the standings order along with them.
+   */
+  const handleVote = async (id: string) => {
+    const submissionId = Number(id);
+    // Sample-data ids are slugs; only real submissions can be voted for.
+    if (!Number.isInteger(submissionId)) return;
+    if (voteBusy) return;
+
+    setVoteBusy(id);
+    setVoteError(null);
+
+    const result =
+      myVote === submissionId ? await api.votes.retract() : await api.votes.cast(submissionId);
+
+    // Every refusal from routes/votes.ts is already a human sentence, so it is shown
+    // as-is — the same way the submit page surfaces its own.
+    if (result.ok) await refresh();
+    else setVoteError(result.error);
+
+    setVoteBusy(null);
   };
 
   const handleFavorite = (id: string) => {
@@ -164,6 +193,11 @@ export default function App() {
             round={round}
             maps={maps}
             mySubmission={mySubmission}
+            myVote={myVote}
+            voteBusy={voteBusy}
+            voteError={voteError}
+            onVote={handleVote}
+            onDismissVoteError={() => setVoteError(null)}
             onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}
@@ -173,12 +207,17 @@ export default function App() {
           <VotePage
             maps={maps}
             round={round}
+            mySubmissionId={mySubmission?.id ?? null}
+            voteBusy={voteBusy}
+            voteError={voteError}
+            onDismissVoteError={() => setVoteError(null)}
             playingId={playState?.id ?? null}
             audioProgress={(id) => (playState?.id === id ? playState.progress : 0)}
             onTogglePlay={handleTogglePlay}
             onScrub={handleScrub}
             onVote={handleVote}
             onFavorite={handleFavorite}
+            onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}
           />

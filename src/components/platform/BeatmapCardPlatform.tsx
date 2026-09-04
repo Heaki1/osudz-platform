@@ -16,7 +16,17 @@ interface BeatmapCardPlatformProps {
   onVote?: () => void;
   onFavorite?: () => void;
   onSubmit?: () => void;
+  /**
+   * Denominator for the vote bar — the leader's count, normally. Omit it and only
+   * the raw count shows: it used to default to 47, which printed a meaningless
+   * "0 / 47" on the dashboard and submit pages, where nothing is being voted on.
+   */
   maxVotes?: number;
+  /** A cast or retract for this card is in flight. */
+  voteBusy?: boolean;
+  /** This card may not be voted for at all — a self-vote, or voting is closed. */
+  voteDisabled?: boolean;
+  voteDisabledReason?: string;
 }
 
 export function BeatmapCardPlatform({
@@ -27,7 +37,10 @@ export function BeatmapCardPlatform({
   onVote,
   onFavorite,
   onSubmit,
-  maxVotes = 47,
+  maxVotes,
+  voteBusy,
+  voteDisabled,
+  voteDisabledReason,
 }: BeatmapCardPlatformProps) {
   const [favorited, setFavorited] = useState(beatmap.isFavorited ?? false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -36,9 +49,11 @@ export function BeatmapCardPlatform({
 
   const isVoted = voted ?? beatmap.isVoted ?? false;
   const status = statusConfig[beatmap.status];
-  const votePercent = beatmap.voteCount !== undefined
-    ? Math.min(100, Math.round((beatmap.voteCount / maxVotes) * 100))
-    : 0;
+  const votePercent =
+    beatmap.voteCount !== undefined && maxVotes !== undefined && maxVotes > 0
+      ? Math.min(100, Math.round((beatmap.voteCount / maxVotes) * 100))
+      : 0;
+  const voteBlocked = Boolean(voteBusy || voteDisabled);
 
   useEffect(() => {
     return () => {
@@ -220,15 +235,19 @@ export function BeatmapCardPlatform({
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase tracking-wider text-slate-600 font-mono">Votes</span>
               <span className="text-[11px] font-black font-mono text-white">{beatmap.voteCount}
-                <span className="text-slate-600 font-normal"> / {maxVotes}</span>
+                {maxVotes !== undefined && (
+                  <span className="text-slate-600 font-normal"> / {maxVotes}</span>
+                )}
               </span>
             </div>
-            <div className="h-1 bg-slate-900 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${isVoted ? 'bg-emerald-400' : 'bg-amber-400/60'}`}
-                style={{ width: `${votePercent}%` }}
-              />
-            </div>
+            {maxVotes !== undefined && (
+              <div className="h-1 bg-slate-900 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${isVoted ? 'bg-emerald-400' : 'bg-amber-400/60'}`}
+                  style={{ width: `${votePercent}%` }}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -236,18 +255,28 @@ export function BeatmapCardPlatform({
         {(showVoteButton || showSubmitButton) && (
           <div className="flex items-center gap-2 pt-0.5">
             {showVoteButton && (
-              <button
-                type="button"
-                onClick={onVote}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-black transition-all active:scale-[0.97] ${
-                  isVoted
-                    ? 'bg-emerald-600/80 hover:bg-emerald-500/80 text-white border border-emerald-500/30'
-                    : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
-                }`}
-              >
-                {isVoted && <CheckCircle2 className="w-3.5 h-3.5" />}
-                {isVoted ? 'Voted' : 'Vote for this'}
-              </button>
+              <div className="flex-1 space-y-1">
+                <button
+                  type="button"
+                  disabled={voteBlocked}
+                  title={voteDisabled ? voteDisabledReason : undefined}
+                  aria-label={voteDisabled && voteDisabledReason ? voteDisabledReason : undefined}
+                  onClick={voteBlocked ? undefined : onVote}
+                  className={`w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-black transition-all active:scale-[0.97] disabled:opacity-30 disabled:cursor-not-allowed ${
+                    isVoted
+                      ? 'bg-emerald-600/80 hover:bg-emerald-500/80 text-white border border-emerald-500/30'
+                      : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                  }`}
+                >
+                  {isVoted && !voteBusy && <CheckCircle2 className="w-3.5 h-3.5" />}
+                  {voteBusy ? 'Voting…' : isVoted ? 'Voted' : 'Vote for this'}
+                </button>
+                {voteDisabled && voteDisabledReason && (
+                  <p className="text-[10px] text-slate-500 text-center leading-snug">
+                    {voteDisabledReason}
+                  </p>
+                )}
+              </div>
             )}
             {showSubmitButton && (
               <button

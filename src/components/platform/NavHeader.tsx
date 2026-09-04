@@ -1,6 +1,6 @@
 import React from 'react';
 import { Phase, PlatformPage } from '../../types';
-import { CurrentRound, useCountdown } from '../../lib/round';
+import { CurrentRound, isPageOpen, useCountdown } from '../../lib/round';
 import { Home, Upload, Trophy, Search, Shield, LogOut, ChevronDown, Archive } from 'lucide-react';
 
 export interface AuthUser {
@@ -9,12 +9,15 @@ export interface AuthUser {
   country: string;
   /** Mirrors ApiUser.isAdmin, derived server-side from ADMIN_OSU_IDS. */
   isAdmin: boolean;
+  /** Mirrors ApiUser.canVote — the server's own eligibility verdict, not a guess. */
+  canVote: boolean;
 }
 
 // osu! reports no global_rank for unranked or inactive accounts.
 const formatRank = (rank: number | null) => (rank === null ? 'unranked' : `#${rank.toLocaleString()}`);
 
-const phaseConfig: Record<Phase, { label: string; color: string; bar: string; badgeBg: string; badgeBorder: string; dot: string }> = {
+/** Exported so a page can label its own phase from the same table as the nav badge. */
+export const phaseConfig: Record<Phase, { label: string; color: string; bar: string; badgeBg: string; badgeBorder: string; dot: string }> = {
   submission: {
     label: 'SUBMISSION PHASE',
     color: 'text-amber-400',
@@ -80,21 +83,30 @@ export function NavHeader({ page, phase, round, onNavigate, user, onLogin, onLog
 
         {/* Nav tabs */}
         <nav className="flex items-stretch h-16">
-          {navItems.map(({ key, label, icon }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onNavigate(key)}
-              className={`flex items-center gap-2 px-4 h-full text-[13px] font-bold tracking-wide border-b-2 transition-all -mb-px ${
-                page === key
-                  ? 'border-amber-400 text-amber-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {icon}
-              {label}
-            </button>
-          ))}
+          {navItems.map(({ key, label, icon }) => {
+            // Out-of-phase pages stay reachable — the vote page is worth reading when
+            // you cannot vote — but they are dimmed so the tab and the closed panel
+            // behind it agree. Both read PAGE_PHASE in lib/round.ts.
+            const open = isPageOpen(key, round);
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onNavigate(key)}
+                title={open ? undefined : `${label} is not open in this phase`}
+                className={`flex items-center gap-2 px-4 h-full text-[13px] font-bold tracking-wide border-b-2 transition-all -mb-px ${
+                  page === key
+                    ? 'border-amber-400 text-amber-400'
+                    : open
+                      ? 'border-transparent text-slate-400 hover:text-slate-200'
+                      : 'border-transparent text-slate-600 hover:text-slate-400'
+                }`}
+              >
+                {icon}
+                {label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="flex-1" />

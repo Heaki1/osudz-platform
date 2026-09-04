@@ -6,7 +6,7 @@
 // stars, cs, ar, od and hp are all read as strings and converted explicitly.
 //
 // Vote counts are computed here rather than stored, so submissions and votes can
-// never drift apart. They read 0 until POST /api/votes exists.
+// never drift apart. Every row routes/votes.ts writes shows up in the next read.
 
 import { pool } from '../db.js';
 

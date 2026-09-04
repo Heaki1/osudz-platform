@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { PlatformPage } from '../../types';
 import { api, ApiBeatmapPreview, ApiSubmission } from '../../api/client';
-import { CurrentRound, roundLabel } from '../../lib/round';
+import { CurrentRound, pageAccess, roundLabel } from '../../lib/round';
 import { beatmapUrl, previewToBeatmap, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';
+import { PhaseGate } from './PhaseGate';
 import {
-  Lock, Upload, Star, Clock, CheckCircle2,
+  Upload, Star, Clock, CheckCircle2,
   Link, Heart, ChevronRight, X, AlertCircle, LogIn,
 } from 'lucide-react';
 
@@ -349,37 +350,6 @@ function FavoritesTab() {
   );
 }
 
-// ── PHASE GATE ────────────────────────────────────────────────────────────────
-
-function SubmissionClosed({ onNavigate }: { onNavigate: (p: PlatformPage) => void }) {
-  return (
-    <div className="flex flex-col items-center gap-6 py-20 text-center">
-      <div className="w-20 h-20 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
-        <Lock className="w-9 h-9 text-slate-600" />
-      </div>
-      <div>
-        <h2 className="text-2xl font-black text-white mb-2">Submissions are currently closed</h2>
-        <p className="text-slate-400 max-w-md text-sm leading-relaxed">
-          The submission phase is not active. Beatmap submissions open at the start of each monthly round.
-        </p>
-      </div>
-      <div className="bg-[#0d1526] border border-slate-800 rounded-2xl px-6 py-4 text-left space-y-2 w-full max-w-sm">
-        <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono">Upcoming</p>
-        <p className="text-sm text-slate-300">
-          Next submission window opens with <span className="text-amber-400 font-bold">Round 2 · September 2026</span>
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={() => onNavigate('dashboard')}
-        className="flex items-center gap-2 px-6 py-2.5 bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 text-sm font-bold rounded-xl transition-all"
-      >
-        Back to Dashboard
-      </button>
-    </div>
-  );
-}
-
 // ── LOGIN GATE ────────────────────────────────────────────────────────────────
 
 function LoginGate({ onLogin }: { onLogin?: () => void }) {
@@ -475,6 +445,8 @@ export function PlatformSubmitPage({
   onLogin,
 }: PlatformSubmitPageProps) {
   const [tab, setTab] = useState<SubmitTab>('url');
+  // Same table the nav and the vote page read, so "closed" means one thing.
+  const access = pageAccess('submit', round);
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 pb-16">
@@ -489,8 +461,8 @@ export function PlatformSubmitPage({
 
       {!user ? (
         <LoginGate onLogin={onLogin} />
-      ) : round?.phase !== 'submission' ? (
-        <SubmissionClosed onNavigate={onNavigate} />
+      ) : access.state !== 'open' ? (
+        <PhaseGate access={access} round={round} onNavigate={onNavigate} />
       ) : loading ? (
         <div className="flex items-center gap-3 py-16 justify-center text-slate-600">
           <span className="w-4 h-4 border-2 border-slate-700 border-t-slate-400 rounded-full animate-spin" />

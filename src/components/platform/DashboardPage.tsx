@@ -8,7 +8,7 @@ import { favoriteBeatmaps, challengeScores } from './sampleData';
 import { AuthUser } from './NavHeader';
 import {
   Trophy, Crown, Upload, ChevronRight, RefreshCw,
-  CheckCircle2, AlertCircle, Clock, LogIn, X, Link as LinkIcon,
+  CheckCircle2, AlertCircle, Clock, LogIn, X, Ban, Link as LinkIcon,
 } from 'lucide-react';
 
 // ── INLINE LOGIN NUDGE ────────────────────────────────────────────────────────
@@ -353,6 +353,13 @@ interface DashboardPageProps {
   maps: Beatmap[];
   /** The signed-in user's own entry, whatever its review status. */
   mySubmission: ApiSubmission | null;
+  /** Submission id the caller voted for in the open round, or null. Server-held. */
+  myVote: number | null;
+  /** Beatmap id whose cast or retract is in flight. */
+  voteBusy: string | null;
+  voteError: string | null;
+  onVote: (id: string) => void;
+  onDismissVoteError: () => void;
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
@@ -373,8 +380,19 @@ function NoActiveRound() {
   );
 }
 
-export function DashboardPage({ round, maps, mySubmission, onNavigate, user, onLogin }: DashboardPageProps) {
-  const [userVote, setUserVote] = useState<string | null>(null);
+export function DashboardPage({
+  round,
+  maps,
+  mySubmission,
+  myVote,
+  voteBusy,
+  voteError,
+  onVote,
+  onDismissVoteError,
+  onNavigate,
+  user,
+  onLogin,
+}: DashboardPageProps) {
   const [favorites, setFavorites] = useState(favoriteBeatmaps);
   // One ticking countdown for the page, called before the early return below so
   // the hook order never changes. Both the header and the challenge hero use it.
@@ -382,6 +400,20 @@ export function DashboardPage({ round, maps, mySubmission, onNavigate, user, onL
 
   const toggleFavorite = (id: string) => {
     setFavorites((prev) => prev.map((b) => (b.id === id ? { ...b, isFavorited: !b.isFavorited } : b)));
+  };
+
+  // The vote lives on the server. This page used to keep its own useState for it,
+  // which reset on every mount and never agreed with the vote page.
+  const canVote = user?.canVote ?? false;
+  const myMapId = myVote === null ? null : String(myVote);
+  const votedMap = myMapId === null ? null : maps.find((b) => b.id === myMapId) ?? null;
+  const ownMapId = mySubmission === null ? null : String(mySubmission.id);
+
+  /** Why this entry cannot be voted for, or undefined when it can. */
+  const refusal = (id: string): string | undefined => {
+    if (!canVote) return 'Voting is available to Algerian osu! players';
+    if (id === ownMapId) return 'You cannot vote for your own submission';
+    return undefined;
   };
 
   // Null whenever nothing is approved yet, so every use below is guarded.
@@ -495,6 +527,20 @@ export function DashboardPage({ round, maps, mySubmission, onNavigate, user, onL
             />
           )}
 
+          {voteError && (
+            <div className="flex items-start gap-2.5 bg-rose-500/10 border border-rose-500/25 rounded-xl px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+              <p className="text-xs text-rose-300 flex-1">{voteError}</p>
+              <button
+                type="button"
+                onClick={onDismissVoteError}
+                className="opacity-60 hover:opacity-100 transition-opacity flex-shrink-0"
+              >
+                <X className="w-3.5 h-3.5 text-rose-300" />
+              </button>
+            </div>
+          )}
+
           {/* My vote + leading */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* My vote */}
@@ -517,16 +563,29 @@ export function DashboardPage({ round, maps, mySubmission, onNavigate, user, onL
                     Login with osu!
                   </button>
                 </div>
-              ) : userVote ? (
+              ) : !canVote ? (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto mb-4">
+                    <Ban className="w-7 h-7 text-slate-700" />
+                  </div>
+                  <p className="text-white font-bold mb-1">Voting is available to Algerian osu! players.</p>
+                  <p className="text-sm text-slate-500">
+                    Eligibility comes from your osu! profile country, read when you log in.
+                  </p>
+                </div>
+              ) : votedMap ? (
                 <>
                   <p className="text-xs text-emerald-400 font-bold mb-4 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
                     You have voted
                   </p>
-                  {(() => {
-                    const v = maps.find((b) => b.id === userVote);
-                    return v ? <BeatmapCardPlatform beatmap={v} voted onVote={() => setUserVote(null)} showVoteButton /> : null;
-                  })()}
+                  <BeatmapCardPlatform
+                    beatmap={votedMap}
+                    voted
+                    showVoteButton
+                    onVote={() => onVote(votedMap.id)}
+                    voteBusy={voteBusy === votedMap.id}
+                  />
                 </>
               ) : (
                 <div className="text-center py-8">
@@ -563,9 +622,12 @@ export function DashboardPage({ round, maps, mySubmission, onNavigate, user, onL
               {leadingMap ? (
                 <BeatmapCardPlatform
                   beatmap={leadingMap}
-                  showVoteButton
-                  voted={userVote === leadingMap.id}
-                  onVote={() => setUserVote(userVote === leadingMap.id ? null : leadingMap.id)}
+                  showVoteButton={Boolean(user)}
+                  voted={myMapId === leadingMap.id}
+                  onVote={() => onVote(leadingMap.id)}
+                  voteBusy={voteBusy === leadingMap.id}
+                  voteDisabled={refusal(leadingMap.id) !== undefined}
+                  voteDisabledReason={refusal(leadingMap.id)}
                 />
               ) : (
                 <p className="text-sm text-slate-500 py-8 text-center">Nothing has been approved for voting yet.</p>
@@ -587,9 +649,12 @@ export function DashboardPage({ round, maps, mySubmission, onNavigate, user, onL
                 <BeatmapCardPlatform
                   key={b.id}
                   beatmap={b}
-                  showVoteButton
-                  voted={userVote === b.id}
-                  onVote={() => setUserVote(userVote === b.id ? null : b.id)}
+                  showVoteButton={Boolean(user)}
+                  voted={myMapId === b.id}
+                  onVote={() => onVote(b.id)}
+                  voteBusy={voteBusy === b.id}
+                  voteDisabled={refusal(b.id) !== undefined}
+                  voteDisabledReason={refusal(b.id)}
                 />
               ))}
             </div>

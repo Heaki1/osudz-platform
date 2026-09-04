@@ -15,6 +15,12 @@ interface BeatmapCardProps {
   onVote: () => void;
   onFavorite: () => void;
   onOpenComments: () => void;
+  /** A cast or retract for this card is in flight. */
+  voteBusy?: boolean;
+  /** This card may not be voted for at all — a self-vote, or voting is closed. */
+  voteDisabled?: boolean;
+  /** Why, for the button's title and aria-label. The page states it in prose too. */
+  voteDisabledReason?: string;
 }
 
 const ratingColors = [
@@ -24,6 +30,7 @@ const ratingColors = [
 export const BeatmapCard: React.FC<BeatmapCardProps> = ({
   beatmap, isPlaying, audioProgress,
   onTogglePlay, onScrubAudio, onVote, onFavorite, onOpenComments,
+  voteBusy, voteDisabled, voteDisabledReason,
 }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [spinClass, setSpinClass] = useState('');
@@ -43,10 +50,16 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
 
+  // One spin at a time. The callback runs on animationend, ~600ms after the click,
+  // so without this guard a double-click would queue a second vote behind the first.
   const triggerSpin = (callback: () => void) => {
+    if (spinRef.current) return;
     spinRef.current = callback;
     setSpinClass('spinning');
   };
+
+  const voteBlocked = Boolean(voteBusy || voteDisabled);
+  const voteTitle = voteDisabled ? voteDisabledReason : undefined;
 
   const handleAnimationEnd = () => {
     spinRef.current?.();
@@ -340,16 +353,25 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
           <div className="mt-auto pt-3 px-4 pb-4 border-t border-slate-800 flex items-center gap-2 flex-shrink-0">
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); triggerSpin(onVote); }}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 active:scale-[0.98] ${
+              disabled={voteBlocked}
+              title={voteTitle}
+              aria-label={voteTitle}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (voteBlocked) return;
+                triggerSpin(onVote);
+              }}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed ${
                 beatmap.isVoted
                   ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
                   : 'bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold'
               }`}
             >
-              {beatmap.isVoted
-                ? <><CheckCircle2 className="w-3.5 h-3.5" /><span>Voted</span></>
-                : <span>Vote</span>}
+              {voteBusy
+                ? <span>Voting…</span>
+                : beatmap.isVoted
+                  ? <><CheckCircle2 className="w-3.5 h-3.5" /><span>Voted</span></>
+                  : <span>Vote</span>}
             </button>
 
             <button
@@ -428,12 +450,23 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
           <div className="p-3 border-t border-slate-800 flex gap-2 flex-shrink-0">
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); triggerSpin(onVote); }}
-              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 ${
+              disabled={voteBlocked}
+              title={voteTitle}
+              aria-label={voteTitle}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (voteBlocked) return;
+                triggerSpin(onVote);
+              }}
+              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed ${
                 beatmap.isVoted ? 'bg-emerald-600 text-white' : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
               }`}
             >
-              {beatmap.isVoted ? <><CheckCircle2 className="w-3.5 h-3.5" /> Voted</> : 'Vote'}
+              {voteBusy
+                ? 'Voting…'
+                : beatmap.isVoted
+                  ? <><CheckCircle2 className="w-3.5 h-3.5" /> Voted</>
+                  : 'Vote'}
             </button>
             <button
               type="button"

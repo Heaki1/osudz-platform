@@ -27,7 +27,8 @@ export function toBeatmap(submission: ApiSubmission): Beatmap {
     od: submission.od,
     hp: submission.hp,
     voteCount: submission.voteCount,
-    isVoted: submission.isVoted ?? false,
+    // isVoted is not on the DTO: whose vote it would be depends on the caller, so
+    // App sets it from GET /api/votes/my instead.
     isFavorited: submission.isFavorited ?? false,
     modRequirement: submission.modRequirement,
     challengeType: submission.challengeRequirement,

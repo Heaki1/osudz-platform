@@ -20,6 +20,23 @@ export interface UserRow {
 
 const COLUMNS = 'id, osu_id, username, country_code, avatar_url, global_rank, is_admin';
 
+/** ISO 3166-1 alpha-2 of the community this platform serves. */
+export const ELIGIBLE_COUNTRY = 'DZ';
+
+/**
+ * Whether this account may submit and vote. docs/my_plan.txt: Algerian players may
+ * submit and vote, everyone else may read and comment.
+ *
+ * The rule lives here, beside toApiUser, so that middleware/auth.ts's gate and the
+ * canVote flag the client reads are the same sentence rather than two copies that
+ * drift. country_code is char(2) and Postgres blank-pads it, hence the trim.
+ * Administrator-granted exceptions for diaspora players are specified in
+ * docs/my_plan.txt too but have no table yet, so today the osu! profile country is
+ * the whole rule.
+ */
+export const isEligible = (row: UserRow): boolean =>
+  row.country_code.trim().toUpperCase() === ELIGIBLE_COUNTRY;
+
 /**
  * Creates the user on first login and refreshes the mutable fields on every
  * later login. Admin status is derived from ADMIN_OSU_IDS each time, so granting
@@ -67,5 +84,6 @@ export function toApiUser(row: UserRow) {
     avatarUrl: row.avatar_url ?? '',
     globalRank: row.global_rank,
     isAdmin: row.is_admin,
+    canVote: isEligible(row),
   };
 }

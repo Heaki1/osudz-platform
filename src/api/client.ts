@@ -15,6 +15,12 @@ export interface ApiUser {
   /** osu! global rank at last login; null for unranked accounts. */
   globalRank: number | null;
   isAdmin: boolean;
+  /**
+   * Whether this account may submit and vote. Computed server-side from the same
+   * rule requireEligible uses, so the client never re-derives eligibility from
+   * `country` and cannot drift from the gate that actually refuses the write.
+   */
+  canVote: boolean;
 }
 
 export interface ApiRound {
@@ -63,7 +69,6 @@ export interface ApiSubmission {
   /** Admin review state. Only 'approved' rows come back from GET /submissions. */
   reviewStatus: "pending" | "approved" | "rejected";
   submittedAt: string;
-  isVoted?: boolean;
   isFavorited?: boolean;
 }
 
