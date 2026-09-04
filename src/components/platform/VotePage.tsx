@@ -202,6 +202,8 @@ interface VotePageProps {
   round: CurrentRound | null;
   /** The caller's own entry. Voting for it is refused by the server, so it is refused here too. */
   mySubmissionId: number | null;
+  /** False while App's first fetch is still in flight. */
+  loading: boolean;
   /** Beatmap id whose cast or retract is in flight. */
   voteBusy: string | null;
   voteError: string | null;
@@ -221,6 +223,7 @@ export function VotePage({
   maps,
   round,
   mySubmissionId,
+  loading,
   voteBusy,
   voteError,
   onDismissVoteError,
@@ -319,6 +322,22 @@ export function VotePage({
       </p>
     </div>
   );
+
+  // Before the phase gate on purpose: with the first fetch still in flight `round` is
+  // null, and the gate would announce that no round is open rather than that nothing is
+  // known yet. Without this the page also flashed "0 total votes" and an empty grid as
+  // though those were the answer.
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-8 pb-16">
+        {header}
+        <div className="flex items-center gap-3 py-20 justify-center text-slate-600">
+          <span className="w-4 h-4 border-2 border-slate-700 border-t-slate-400 rounded-full animate-spin" />
+          <span className="text-sm">Loading this round's entries…</span>
+        </div>
+      </div>
+    );
+  }
 
   // Outside the voting phase the page keeps its header and swaps the body, the way the
   // submit page does, so a reader still knows where they are.

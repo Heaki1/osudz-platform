@@ -410,7 +410,12 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: give administrators a vote moderation view"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  B12 Loading state on the vote page                                     [TODO]
+  B12 Loading state on the vote page                                     [DONE]
+      LANDED: App's `loaded` reaches VotePage, and the branch sits BEFORE the phase gate
+      deliberately — with the first fetch in flight `round` is still null, so the gate
+      would have announced that no round is open rather than that nothing is known yet.
+      The page no longer flashes "0 total votes" and an empty grid as though those were
+      the answer. Same spinner idiom as the submit page.
       WHAT   Pass App's `loaded` into VotePage and render a loading state instead
              of zeroed stats while the first fetch is in flight.
       WHY    my_plan.txt:801 requires a loading state, and :820 says not to design
@@ -1296,7 +1301,10 @@ fix it as its own item with its own commit.
              5 COMMIT    "test: add vitest and cover the round and vote logic"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  H3  Delete the dead votingBeatmaps export                               [TODO]
+  H3  Delete the dead votingBeatmaps export                              [DONE]
+      LANDED: deleted. It was the only place left in src/ with non-zero vote counts, so
+      it read like a live source to anyone skimming and was not one. grep src/ for
+      votingBeatmaps returns nothing.
       WHAT   Remove votingBeatmaps from src/components/platform/sampleData.ts.
       WHY    Nothing imports it — grep finds only its own declaration. It is also
              the only place in src/ with non-zero vote counts, so it reads like a

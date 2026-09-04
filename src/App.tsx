@@ -252,6 +252,7 @@ export default function App() {
             maps={maps}
             round={round}
             mySubmissionId={mySubmission?.id ?? null}
+            loading={!loaded}
             voteBusy={voteBusy}
             voteError={voteError}
             onDismissVoteError={() => setVoteError(null)}
