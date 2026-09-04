@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { requireAuth, requireEligible } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import { findById as findRound, findCurrent } from '../repo/rounds.js';
 import { findById as findSubmission } from '../repo/submissions.js';
 import {
@@ -112,7 +113,11 @@ router.get('/my', requireAuth, async (req, res) => {
 // same requireEligible gate as submitting and voting, so the challenge is for the same
 // community as the rest of the platform. If non-Algerian players should be able to
 // compete, this one middleware becomes requireAuth and nothing else changes.
-router.post('/scores', requireEligible, async (req, res) => {
+// This one reaches the osu! API too, and a player refreshing after every attempt is a
+// reasonable thing to do — so the limit is generous but present.
+const importLimit = rateLimit({ limit: 20, windowMs: 60_000, what: 'score imports' });
+
+router.post('/scores', requireEligible, importLimit, async (req, res) => {
   try {
     const context = await resolveChallenge(null);
     if (!context) {

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
+import { env } from './env.js';
 import authRouter from './routes/auth.js';
 import roundsRouter from './routes/rounds.js';
 import submissionsRouter from './routes/submissions.js';
@@ -12,7 +13,9 @@ import challengeRouter from './routes/challenge.js';
 const app = express();
 const PORT = parseInt(process.env.API_PORT ?? '3001', 10);
 
-app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:8443', credentials: true }));
+// One origin, with credentials. env.ts validates it and refuses to boot in production
+// without it, rather than silently allowing localhost on a deployed host.
+app.use(cors({ origin: env.clientOrigin, credentials: true }));
 app.use(express.json());
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));

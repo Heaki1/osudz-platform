@@ -55,9 +55,14 @@ function readCookie(req: Request, name: string): string | undefined {
   return undefined;
 }
 
-/** sameSite 'lax' so the cookie survives the top-level redirect back from osu!. */
+/**
+ * sameSite 'lax' so the cookie survives the top-level redirect back from osu!.
+ *
+ * secure comes from env.useSecureCookies rather than NODE_ENV directly, so an https
+ * deployment that forgot NODE_ENV=production still gets a Secure cookie.
+ */
 function cookieOptions() {
-  return { httpOnly: true, sameSite: 'lax' as const, secure: env.isProduction, path: '/' };
+  return { httpOnly: true, sameSite: 'lax' as const, secure: env.useSecureCookies, path: '/' };
 }
 
 export function setSession(res: Response, osuId: number): void {

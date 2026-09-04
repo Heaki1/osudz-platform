@@ -15,6 +15,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { requireAuth, requireEligible } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import { findCurrent } from '../repo/rounds.js';
 import { findById } from '../repo/submissions.js';
 import { cast, findByUserAndRound, retract } from '../repo/votes.js';
@@ -70,7 +71,12 @@ router.get('/my', requireAuth, async (req, res) => {
 // POST /api/votes — cast a vote, or move an existing one to another submission.
 // Requires an eligible session, the voting phase, and an approved entry in the open
 // round that the caller did not submit themselves.
-router.post('/', requireEligible, async (req, res) => {
+// One limiter shared by casting and retracting, because moving a vote is one of each
+// and the pair is what a churning client produces. Thirty a minute leaves room to change
+// your mind repeatedly while browsing and still stops a loop.
+const voteLimit = rateLimit({ limit: 30, windowMs: 60_000, what: 'vote changes' });
+
+router.post('/', requireEligible, voteLimit, async (req, res) => {
   const { submissionId } = (req.body ?? {}) as { submissionId?: unknown };
   const id =
     typeof submissionId === 'number' || typeof submissionId === 'string'
@@ -142,7 +148,7 @@ router.post('/', requireEligible, async (req, res) => {
 //
 // requireAuth rather than requireEligible: someone whose osu! profile country
 // changed after they voted must still be able to take back the vote they hold.
-router.delete('/', requireAuth, async (req, res) => {
+router.delete('/', requireAuth, voteLimit, async (req, res) => {
   try {
     const round = await findCurrent();
     if (!round) {

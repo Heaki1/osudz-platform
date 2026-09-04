@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { requireAuth, requireEligible } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import { findCurrent } from '../repo/rounds.js';
 import {
   ALLOWED_CHALLENGE_TYPES,
@@ -121,7 +122,12 @@ router.delete('/mine', requireEligible, async (req, res) => {
 
 // POST /api/submissions/lookup — resolve a pasted URL to beatmap metadata.
 // Read-only: nothing is written, so this needs a session but no phase check.
-router.post('/lookup', requireEligible, async (req, res) => {
+// Limited harder than the rest: every call reaches out to the osu! API on the
+// application's own token, so an authenticated account could otherwise spend the whole
+// quota in a loop. Twenty a minute is far more than pasting links by hand needs.
+const lookupLimit = rateLimit({ limit: 20, windowMs: 60_000, what: 'beatmap lookups' });
+
+router.post('/lookup', requireEligible, lookupLimit, async (req, res) => {
   const { url } = (req.body ?? {}) as { url?: unknown };
   if (typeof url !== 'string' || url.trim() === '') {
     res.status(400).json({ error: 'Paste an osu! beatmap URL' });
@@ -146,7 +152,9 @@ router.post('/lookup', requireEligible, async (req, res) => {
 
 // POST /api/submissions — enter a beatmap in the open round.
 // Requires an eligible session, the submission phase, and no existing entry.
-router.post('/', requireEligible, async (req, res) => {
+const submitLimit = rateLimit({ limit: 10, windowMs: 60_000, what: 'submission attempts' });
+
+router.post('/', requireEligible, submitLimit, async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
 
   const difficultyId =

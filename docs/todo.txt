@@ -1199,7 +1199,20 @@ fix it as its own item with its own commit.
       as JSON, a malformed body 400s as JSON instead of HTML, and valid requests
       still reach their guards and answer 401.
 
-  G3  Rate-limit the write endpoints                                     [TODO]
+  G3  Rate-limit the write endpoints                                     [DONE]
+      LANDED: middleware/rateLimit.ts, a fixed window per account with no dependency and
+      no store, because this API is one process. Keyed on the ACCOUNT, never the IP: every
+      limited route already requires a session, and an IP is shared by a household or a
+      campus — limiting it would punish a community that plays from a handful of networks.
+      Limits, all per minute: 20 beatmap lookups and 20 score imports (both spend the
+      application's osu! quota on every call, which is what made this urgent), 10 submits,
+      and 30 vote changes shared between casting and retracting, since moving a vote is
+      one of each. 429 with the same { error } shape as everything else, plus Retry-After.
+      Expired windows are swept on the cheap path once the map passes 256 entries, so a
+      long-running process does not keep one entry per account that ever used a route.
+      HONEST LIMIT: in-process means a restart forgets everything, and more than one
+      instance would each enforce their own share. Both are recorded at the top of the
+      file as the trade for staying dependency-free.
       WHAT   A per-account limiter on POST /api/submissions/lookup, POST
              /api/submissions and POST/DELETE /api/votes.
       WHY    There is no limiter anywhere. The lookup route calls the osu! API on
@@ -1217,7 +1230,26 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: rate-limit the write endpoints"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  G4  Production CORS and cookie review                                  [TODO]
+  G4  Production CORS and cookie review                                  [DONE]
+      REVIEWED, and it turned up three real footguns, all fixed. What was already right:
+      sameSite 'lax' on both cookies (needed for the top-level redirect back from osu!),
+      httpOnly, the HMAC seal, the single-use OAuth state nonce, and ADMIN_OSU_IDS
+      defaulting to nobody rather than everybody.
+      FIXED 1: CLIENT_ORIGIN was read straight from process.env at the call site with a
+      localhost fallback, which meant a deployed host missing it would silently allow
+      credentialed requests from localhost:8443 and refuse the real client. It now lives
+      in env.ts and is required once NODE_ENV=production.
+      FIXED 2: PUBLIC_BASE_URL had the same localhost fallback, and a production deploy
+      that forgot it would redirect every player to localhost after login. Also required
+      in production now. Both stay defaulted in development so a fresh checkout boots.
+      FIXED 3: cookies were Secure only when NODE_ENV said production, so an https deploy
+      that forgot that one variable would send the session cookie with no Secure flag and
+      nothing would look broken. Secure is now derived from the scheme in use as well —
+      env.useSecureCookies is isProduction OR an https PUBLIC_BASE_URL — because an https
+      base URL is the condition under which a Secure cookie works.
+      NOT VERIFIABLE HERE: this item's VERIFY asks for checks against a deployed host.
+      There is no deployment, so the three checks (login completes, the cookie carries
+      Secure and HttpOnly, another origin is refused) remain for the first deploy.
       WHAT   Confirm the deployed configuration: one CLIENT_ORIGIN with
              credentials, secure cookies under NODE_ENV=production, PUBLIC_BASE_URL
              and OSU_REDIRECT_URI agreeing with the real host.
@@ -1234,7 +1266,21 @@ fix it as its own item with its own commit.
              5 COMMIT    only if code changed
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  G5  Wire DISCORD_WEBHOOK or drop it                                    [TODO]
+  G5  Wire DISCORD_WEBHOOK or drop it                                    [DONE]
+      WIRED rather than dropped, because the config tab already advertises "Announce
+      phase changes and winner to a Discord channel". services/discord.ts posts on four
+      events: submissions closing into voting, the ballot closing (naming the frozen tally
+      and saying whether it tied), a winner becoming official (named, because "submission
+      #7 won" tells a reader nothing), and a round archiving.
+      Fire-and-forget, and it swallows its own failures. An announcement is a courtesy: an
+      administrator approving a winner must never be told the approval failed because a
+      webhook timed out. An unset DISCORD_WEBHOOK means silence, which is a supported
+      configuration rather than a broken one. allowed_mentions is cleared so a round
+      announcement can never ping a whole server.
+      CALLED FROM BOTH PATHS: the clock's transitions announce from
+      applyDueTransitions — nowhere else could know, since no request asked for them —
+      and the admin routes announce their own, but only when the phase actually MOVED,
+      because PATCH /round/phase is also how a deadline gets rewritten.
       WHAT   Either post phase and winner announcements to it, or remove it from
              server/.env.example.
       WHY    It is declared for "phase / winner announcements" and read by

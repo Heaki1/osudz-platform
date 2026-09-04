@@ -7,6 +7,7 @@
 // a single row cannot be both.
 
 import { pool } from '../db.js';
+import { announceBallotClosed, announcePhase } from '../services/discord.js';
 
 export type RoundPhase = 'submission' | 'voting' | 'challenge' | 'ended';
 
@@ -149,7 +150,13 @@ async function applyDueTransitions(round: RoundRow): Promise<RoundRow> {
   let current = round;
 
   if (current.phase === 'submission' && isDue(current.submission_ends_at)) {
-    current = (await advanceOnDeadline(current.id, 'submission', 'voting')) ?? current;
+    const moved = await advanceOnDeadline(current.id, 'submission', 'voting');
+    if (moved) {
+      current = moved;
+      // Announced here rather than in the route, because this is the transition no
+      // request asked for: only the clock performs it, so nowhere else could know.
+      announcePhase(moved, 'voting', true);
+    }
   }
 
   // The deadline closes the ballot; it does not move the phase. closeVoting locks the
@@ -161,14 +168,25 @@ async function applyDueTransitions(round: RoundRow): Promise<RoundRow> {
     isDue(current.voting_ends_at)
   ) {
     const outcome = await closeVoting(current.id);
-    if (outcome.ok) current = outcome.round;
+    if (outcome.ok) {
+      current = outcome.round;
+      announceBallotClosed(outcome.round, {
+        tied: outcome.tied,
+        votes: outcome.round.winner_vote_count,
+        total: outcome.round.total_votes,
+      });
+    }
     // 'no-entries' leaves the ballot open deliberately. A round with nothing approved
     // has no winner to record, and closing it would strand it in a state only a
     // result correction could leave; an administrator decides what to do instead.
   }
 
   if (current.phase === 'challenge' && isDue(current.challenge_ends_at)) {
-    current = (await advanceOnDeadline(current.id, 'challenge', 'ended')) ?? current;
+    const moved = await advanceOnDeadline(current.id, 'challenge', 'ended');
+    if (moved) {
+      current = moved;
+      announcePhase(moved, 'ended', true);
+    }
   }
 
   return current;

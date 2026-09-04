@@ -29,6 +29,7 @@ import {
   type ReviewDecision,
 } from '../repo/submissions.js';
 import { findByOsuId } from '../repo/users.js';
+import { announceBallotClosed, announcePhase, announceWinner } from '../services/discord.js';
 import {
   qualifies,
   toApiChallengeScore,
@@ -107,6 +108,9 @@ router.patch('/round/phase', async (req, res) => {
       res.status(409).json({ error: 'Round no longer exists' });
       return;
     }
+    // Only when the phase actually moved: this endpoint is also how a deadline gets
+    // rewritten, and canTransition allows from === to for exactly that reason.
+    if (updated.phase !== open.phase) announcePhase(updated, updated.phase, false);
     res.json({ ok: true, round: toApiRound(updated) });
   } catch (err) {
     fail(res, err, 'phase update');
@@ -138,6 +142,11 @@ router.post('/round/close-voting', async (req, res) => {
       return;
     }
 
+    announceBallotClosed(outcome.round, {
+      tied: outcome.tied,
+      votes: outcome.round.winner_vote_count,
+      total: outcome.round.total_votes,
+    });
     res.json({ ok: true, round: toApiRound(outcome.round), tied: outcome.tied });
   } catch (err) {
     fail(res, err, 'close voting');
@@ -187,6 +196,14 @@ router.post('/round/winner', async (req, res) => {
       res.status(409).json({ error: message });
       return;
     }
+
+    // Named rather than numbered: an announcement that says submission #7 won tells a
+    // reader nothing. A winner that has since been deleted announces without a name.
+    const entry =
+      outcome.round.winning_submission_id === null
+        ? null
+        : await findSubmission(outcome.round.winning_submission_id);
+    announceWinner(outcome.round, entry);
 
     res.json({ ok: true, round: toApiRound(outcome.round) });
   } catch (err) {
