@@ -1015,7 +1015,22 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: fetch challenge scores from the osu! API"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  E3  Real challenge leaderboard on the dashboard                        [TODO]
+  E3  Real challenge leaderboard on the dashboard                        [DONE]
+      LANDED: ChallengeLeaderboard reads GET /api/challenge/scores, with loading and
+      empty states, real osu! avatars, and the caller's own row marked from their
+      account id rather than a hardcoded isMe flag. It does NOT re-sort what the server
+      sent — three of the four challenge requirements are relative and the order IS the
+      requirement — and it names the requirement it is ordered by so a reader knows why
+      the top row is the top row.
+      ALSO REPLACED, and it was worse than the leaderboard: the "My Challenge Rank"
+      card was fabricated end to end — an invented username, rank #5, a score, and a
+      hardcoded "You need 0 misses to qualify for the FC challenge" that had nothing to
+      do with the round's actual requirement. It is now MyChallengeScore: the caller's
+      real row with the rank the server computed, the round's real requirement, an
+      import button, and a reason for not qualifying only where a single play can
+      actually be judged — never for the three relative requirements.
+      The fabricated challengeScores export is deleted from sampleData.ts, and the
+      ChallengeScore type in src/types.ts now has no users (H5's ledger).
       WHAT   ChallengeLeaderboard reads the E1 endpoint instead of challengeScores
              from sampleData.ts, with empty and loading states.
       WHY    src/components/platform/DashboardPage.tsx renders seven fabricated

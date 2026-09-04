@@ -4,6 +4,8 @@ import { CurrentRound, isBallotOpen, isPageOpen, useCountdown } from '../../lib/
 import { Home, Upload, Trophy, Search, Shield, LogOut, ChevronDown, Archive } from 'lucide-react';
 
 export interface AuthUser {
+  /** The osu!DZ account id, so a page can tell which leaderboard row is the caller's. */
+  id: number;
   username: string;
   rank: number | null;
   country: string;

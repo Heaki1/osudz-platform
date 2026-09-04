@@ -1,4 +1,4 @@
-import { Beatmap, ChallengeScore, ArchiveEntry } from '../../types';
+import { Beatmap, ArchiveEntry } from '../../types';
 
 export const favoriteBeatmaps: Beatmap[] = [
   {
@@ -208,16 +208,6 @@ export const votingBeatmaps: Beatmap[] = [
     challengeType: 'Best Accuracy',
     submittedByName: 'helixia_dz',
   },
-];
-
-export const challengeScores: ChallengeScore[] = [
-  { rank: 1, username: 'Yanis_dzx',  score: 8_420_320, accuracy: 99.1, misses: 0,  mods: 'HD', qualified: true  },
-  { rank: 2, username: 'Rezki',      score: 7_801_440, accuracy: 98.7, misses: 1,  mods: 'NM', qualified: true  },
-  { rank: 3, username: 'imed_osu',   score: 6_540_200, accuracy: 97.2, misses: 3,  mods: 'NM', qualified: false },
-  { rank: 4, username: 'Karim_DZ',   score: 5_920_100, accuracy: 96.8, misses: 5,  mods: 'HR', qualified: false },
-  { rank: 5, username: 'helixia_dz', score: 4_201_880, accuracy: 95.3, misses: 7,  mods: 'NM', qualified: false, isMe: true },
-  { rank: 6, username: 'Djamel',     score: 3_890_750, accuracy: 94.1, misses: 9,  mods: 'NM', qualified: false },
-  { rank: 7, username: 'nassim_dz',  score: 2_740_340, accuracy: 92.8, misses: 12, mods: 'EZ', qualified: false },
 ];
 
 export const archiveData: ArchiveEntry[] = [

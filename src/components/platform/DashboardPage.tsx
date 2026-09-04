@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Beatmap, Phase, PlatformPage } from '../../types';
-import { ApiSubmission } from '../../api/client';
+import { ApiChallengeScore, ApiSubmission } from '../../api/client';
 import { CurrentRound, formatDeadline, isBallotOpen, roundLabel, useCountdown } from '../../lib/round';
 import { beatmapUrl, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { WithdrawButton } from './WithdrawButton';
-import { favoriteBeatmaps, challengeScores } from './sampleData';
+import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';
 import {
   Trophy, Crown, Upload, ChevronRight, RefreshCw,
@@ -103,15 +103,205 @@ function RoundHeader({ round, countdown }: { round: CurrentRound; countdown: str
   );
 }
 
+// ── MY CHALLENGE SCORE ───────────────────────────────────────────────────────
+//
+// Replaces a card that was entirely fabricated — an invented username, rank, score
+// and a hardcoded "you need 0 misses to qualify" line that had nothing to do with the
+// round's actual requirement.
+//
+// The score is read from osu! rather than typed in: the player's play on a public
+// beatmap is public data, so there is nothing for them to assert and nothing to
+// dispute. Importing again picks up a better play.
+
+function MyChallengeScore({
+  score,
+  requirement,
+  modRequirement,
+  onImport,
+  user,
+  onLogin,
+}: {
+  score: ApiChallengeScore | null;
+  requirement: string | null;
+  modRequirement: string | null;
+  onImport: () => Promise<string | null>;
+  user: AuthUser | null;
+  onLogin?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    setError(await onImport());
+    setBusy(false);
+  };
+
+  const importButton = (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => { void run(); }}
+      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-black bg-amber-400 hover:bg-amber-300 text-slate-950 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+    >
+      <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+      {busy ? 'Reading osu!…' : score ? 'Refresh from osu!' : 'Import my score'}
+    </button>
+  );
+
+  return (
+    <div className="bg-[#0d1526] border border-amber-400/20 rounded-2xl p-6">
+      <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-5">
+        My Challenge Score
+      </p>
+
+      {error && (
+        <div className="flex items-start gap-2 bg-rose-500/10 border border-rose-500/25 rounded-xl px-3 py-2 mb-4">
+          <AlertCircle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0 mt-px" />
+          <p className="text-[11px] text-rose-300 flex-1">{error}</p>
+          <button type="button" onClick={() => setError(null)} className="opacity-60 hover:opacity-100 flex-shrink-0">
+            <X className="w-3 h-3 text-rose-300" />
+          </button>
+        </div>
+      )}
+
+      {!user ? (
+        <div className="text-center py-4">
+          <p className="text-sm text-slate-400 mb-4">Log in to post your score for this challenge.</p>
+          <button
+            type="button"
+            onClick={onLogin}
+            className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl transition-all"
+          >
+            Login with osu!
+          </button>
+        </div>
+      ) : !score ? (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Play the challenge map on osu!, then import your score — it is read straight from
+            your osu! profile, so there is nothing to type in.
+          </p>
+          {requirement && (
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              This round asks for <span className="text-amber-400 font-bold">{requirement}</span>
+              {modRequirement && modRequirement !== 'NM' && (
+                <> with <span className="text-white font-mono font-bold">{modRequirement}</span></>
+              )}
+              {modRequirement === 'NM' && <> with no mods</>}.
+            </p>
+          )}
+          {importButton}
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-4 mb-5">
+            <div className="w-14 h-14 rounded-full bg-amber-400/10 border-2 border-amber-400/25 flex items-center justify-center flex-shrink-0">
+              <span className="text-amber-400 font-black text-xl">
+                {score.rank > 0 ? `#${score.rank}` : '—'}
+              </span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-white font-bold truncate">{score.username}</p>
+              <div className="mt-1">
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                    score.qualified
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                      : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                  }`}
+                >
+                  {score.qualified ? 'QUALIFIED' : 'NOT QUALIFIED'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            {[
+              { label: 'Score', value: score.score.toLocaleString() },
+              { label: 'Accuracy', value: `${score.accuracy.toFixed(2)}%` },
+              { label: 'Misses', value: String(score.misses) },
+              { label: 'Mods', value: score.mods },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-3">
+                <div className="text-[10px] text-slate-600 uppercase tracking-wider mb-1">{label}</div>
+                <div className="text-sm font-black font-mono text-white">{value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Why it did not qualify, when that can be said from the play alone. The
+              three relative requirements cannot be judged this way — they are the
+              leaderboard's order — so nothing is claimed about them here. */}
+          {!score.qualified && (
+            <p className="text-[11px] text-slate-600 mt-4 leading-relaxed">
+              {requirement === 'Full Combo' && score.misses > 0
+                ? `This round asks for a Full Combo and this play has ${score.misses} miss${score.misses === 1 ? '' : 'es'}.`
+                : modRequirement
+                  ? `This round asks for ${modRequirement === 'NM' ? 'no mods' : modRequirement}, and this play was set with ${score.mods}.`
+                  : 'This play did not meet the round requirement.'}
+            </p>
+          )}
+
+          <div className="mt-4">{importButton}</div>
+          {score.osuScoreId === null && (
+            <p className="text-[10px] text-slate-600 mt-2">
+              Entered by an administrator rather than imported.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── CHALLENGE LEADERBOARD ────────────────────────────────────────────────────
 
-function ChallengeLeaderboard({ roundNumber }: { roundNumber: number }) {
+/**
+ * The round's real scores, in the order the server returned them.
+ *
+ * That order is not decorative: three of the four challenge requirements are relative
+ * ('Top #1 Score', 'Best Accuracy', 'Lowest Miss Count'), so the server sorts by the
+ * one this round asked for and this table must not re-sort. `qualified` carries only
+ * what a single play can be judged on by itself.
+ */
+function ChallengeLeaderboard({
+  roundNumber,
+  scores,
+  loaded,
+  myUserId,
+  requirement,
+}: {
+  roundNumber: number;
+  scores: ApiChallengeScore[];
+  loaded: boolean;
+  myUserId: number | null;
+  requirement: string | null;
+}) {
   return (
     <div className="bg-[#0d1526] border border-slate-800/80 rounded-2xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-800/60 flex items-center justify-between">
-        <h3 className="text-sm font-bold text-white">Challenge Leaderboard</h3>
-        <span className="text-[10px] text-slate-600 font-mono uppercase tracking-wider">Algeria · Round {roundNumber}</span>
+      <div className="px-5 py-4 border-b border-slate-800/60 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-bold text-white">Challenge Leaderboard</h3>
+          {requirement && (
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Ranked by this round's requirement: {requirement}
+            </p>
+          )}
+        </div>
+        <span className="text-[10px] text-slate-600 font-mono uppercase tracking-wider">Round {roundNumber}</span>
       </div>
+
+      {!loaded ? (
+        <p className="px-5 py-10 text-sm text-slate-500 text-center">Loading scores…</p>
+      ) : scores.length === 0 ? (
+        <p className="px-5 py-10 text-sm text-slate-500 text-center">
+          No scores yet. Play the challenge map and import your score to be the first.
+        </p>
+      ) : (
+      <>
 
       {/* Header row */}
       <div className="flex items-center gap-4 px-5 py-2 bg-slate-900/30 border-b border-slate-800/40">
@@ -126,11 +316,13 @@ function ChallengeLeaderboard({ roundNumber }: { roundNumber: number }) {
       </div>
 
       <div className="divide-y divide-slate-800/40">
-        {challengeScores.map((entry) => (
+        {scores.map((entry) => {
+          const isMe = myUserId !== null && entry.userId === myUserId;
+          return (
           <div
-            key={entry.rank}
+            key={entry.userId}
             className={`flex items-center gap-4 px-5 py-3 transition-colors ${
-              entry.isMe
+              isMe
                 ? 'bg-amber-400/5 border-l-2 border-l-amber-400'
                 : entry.qualified
                 ? 'hover:bg-emerald-500/5'
@@ -142,22 +334,31 @@ function ChallengeLeaderboard({ roundNumber }: { roundNumber: number }) {
               {entry.rank}
             </span>
 
-            {/* Avatar */}
-            <div
-              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 ${
-                entry.qualified
-                  ? 'bg-emerald-500/20 text-emerald-300'
-                  : 'bg-slate-800 text-slate-500'
-              }`}
-            >
-              {entry.username[0].toUpperCase()}
-            </div>
+            {/* Avatar — the osu! one when we have it, the initial when we do not. */}
+            {entry.avatarUrl ? (
+              <img
+                src={entry.avatarUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="w-8 h-8 rounded-full flex-shrink-0 object-cover bg-slate-800"
+              />
+            ) : (
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 ${
+                  entry.qualified
+                    ? 'bg-emerald-500/20 text-emerald-300'
+                    : 'bg-slate-800 text-slate-500'
+                }`}
+              >
+                {entry.username.slice(0, 1).toUpperCase()}
+              </div>
+            )}
 
             {/* Username */}
             <div className="flex-1 min-w-0">
-              <p className={`text-sm font-bold truncate ${entry.isMe ? 'text-amber-400' : 'text-white'}`}>
+              <p className={`text-sm font-bold truncate ${isMe ? 'text-amber-400' : 'text-white'}`}>
                 {entry.username}
-                {entry.isMe && <span className="text-amber-400/60 font-normal ml-1 text-xs">(you)</span>}
+                {isMe && <span className="text-amber-400/60 font-normal ml-1 text-xs">(you)</span>}
               </p>
             </div>
 
@@ -197,8 +398,11 @@ function ChallengeLeaderboard({ roundNumber }: { roundNumber: number }) {
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -385,6 +589,14 @@ interface DashboardPageProps {
   voteError: string | null;
   onVote: (id: string) => void;
   onDismissVoteError: () => void;
+  /** The round's challenge scores, already ordered by the server. Never re-sort them. */
+  challengeScores: ApiChallengeScore[];
+  /** False until the first leaderboard read resolves, so "empty" is not shown early. */
+  challengeLoaded: boolean;
+  /** The caller's own recorded score for this round, or null. */
+  myScore: ApiChallengeScore | null;
+  /** Imports the caller's osu! score. Resolves to an error message, or null on success. */
+  onImportScore: () => Promise<string | null>;
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
@@ -415,6 +627,10 @@ export function DashboardPage({
   voteError,
   onVote,
   onDismissVoteError,
+  challengeScores,
+  challengeLoaded,
+  myScore,
+  onImportScore,
   onNavigate,
   user,
   onLogin,
@@ -496,6 +712,14 @@ export function DashboardPage({
   // Aliased so the vote callback below closes over a narrowed const rather than
   // re-reading standing.map, which narrowing does not follow into a closure.
   const topEntry = standing.map;
+
+  /**
+   * The caller's own score. Preferred from the leaderboard, because that copy carries
+   * the rank the server computed; GET /challenge/my has no rank to give, since a rank
+   * only exists relative to the other plays.
+   */
+  const myRow =
+    (user === null ? null : challengeScores.find((s) => s.userId === user.id) ?? null) ?? myScore;
 
   if (!round) {
     return (
@@ -846,43 +1070,24 @@ export function DashboardPage({
 
           {/* My rank + leaderboard */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* My rank card */}
-            <div className="bg-[#0d1526] border border-amber-400/20 rounded-2xl p-6">
-              <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-5">My Challenge Rank</p>
-              <div className="flex items-center gap-4 mb-5">
-                <div className="w-14 h-14 rounded-full bg-amber-400/10 border-2 border-amber-400/25 flex items-center justify-center flex-shrink-0">
-                  <span className="text-amber-400 font-black text-xl">#5</span>
-                </div>
-                <div>
-                  <p className="text-white font-bold">helixia_dz</p>
-                  <div className="mt-1">
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold">
-                      NOT QUALIFIED
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2.5">
-                {[
-                  { label: 'Score',    value: '4,201,880' },
-                  { label: 'Accuracy', value: '95.3%'     },
-                  { label: 'Misses',   value: '7'         },
-                  { label: 'Mods',     value: 'NM'        },
-                ].map(({ label, value }) => (
-                  <div key={label} className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-3">
-                    <div className="text-[10px] text-slate-600 uppercase tracking-wider mb-1">{label}</div>
-                    <div className="text-sm font-black font-mono text-white">{value}</div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[11px] text-slate-600 mt-4 leading-relaxed">
-                You need <span className="text-amber-400 font-bold">0 misses</span> to qualify for the FC challenge. Keep grinding!
-              </p>
-            </div>
+            <MyChallengeScore
+              score={myRow}
+              requirement={recordedWinner?.challengeType ?? null}
+              modRequirement={recordedWinner?.modRequirement ?? null}
+              onImport={onImportScore}
+              user={user}
+              onLogin={onLogin}
+            />
 
             {/* Leaderboard */}
             <div className="lg:col-span-2">
-              <ChallengeLeaderboard roundNumber={round.roundNumber} />
+              <ChallengeLeaderboard
+                roundNumber={round.roundNumber}
+                scores={challengeScores}
+                loaded={challengeLoaded}
+                myUserId={user?.id ?? null}
+                requirement={recordedWinner?.challengeType ?? null}
+              />
             </div>
           </div>
         </div>

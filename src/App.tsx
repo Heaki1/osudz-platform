@@ -6,7 +6,7 @@ import { SearchPage } from './components/platform/SearchPage';
 import { AdminDashboard } from './components/platform/AdminDashboard';
 import { PlatformSubmitPage } from './components/platform/PlatformSubmitPage';
 import { ArchivePage } from './components/platform/ArchivePage';
-import { api, ApiSubmission, ApiUser } from './api/client';
+import { api, ApiChallengeScore, ApiSubmission, ApiUser } from './api/client';
 import { CurrentRound, toCurrentRound } from './lib/round';
 import { toBeatmap } from './lib/submission';
 import { Beatmap, Phase, PlatformPage } from './types';
@@ -14,6 +14,7 @@ import { Beatmap, Phase, PlatformPage } from './types';
 type PlayState = { id: string; progress: number; audio?: HTMLAudioElement };
 
 const toAuthUser = (u: ApiUser): AuthUser => ({
+  id: u.id,
   username: u.username,
   rank: u.globalRank,
   country: u.country,
@@ -33,6 +34,11 @@ export default function App() {
   /** Beatmap id whose cast or retract is in flight, so one click at a time. */
   const [voteBusy, setVoteBusy] = useState<string | null>(null);
   const [voteError, setVoteError] = useState<string | null>(null);
+  /** The open round's challenge scores, in the order the server ordered them. */
+  const [challengeScores, setChallengeScores] = useState<ApiChallengeScore[]>([]);
+  const [challengeLoaded, setChallengeLoaded] = useState(false);
+  /** The caller's own recorded score for the open round, or null. */
+  const [myScore, setMyScore] = useState<ApiChallengeScore | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [playState, setPlayState] = useState<PlayState | null>(null);
 
@@ -41,17 +47,19 @@ export default function App() {
   // their actual behaviour off `round` being null.
   const phase: Phase = round?.phase ?? 'submission';
 
-  // Round, approved submissions, the caller's own entry and the caller's vote travel
-  // together: approving an entry, casting a vote or advancing a phase changes several
-  // of them at once, so everything reloads as a set. The two per-caller reads answer
-  // 401 when signed out and client.ts maps a failed read to null, so asking for them
-  // before the session is known is safe.
+  // Round, approved submissions, the caller's own entry, their vote and the challenge
+  // leaderboard travel together: approving an entry, casting a vote, importing a score
+  // or advancing a phase changes several of them at once, so everything reloads as a
+  // set. The per-caller reads answer 401 when signed out and client.ts maps a failed
+  // read to null, so asking for them before the session is known is safe.
   const refresh = useCallback(async () => {
-    const [current, submissions, mine, vote] = await Promise.all([
+    const [current, submissions, mine, vote, scores, score] = await Promise.all([
       api.rounds.current(),
       api.submissions.list(),
       api.submissions.mine(),
       api.votes.my(),
+      api.challenge.scores(),
+      api.challenge.my(),
     ]);
     // isVoted is per-caller, so it is applied here rather than in toBeatmap.
     const votedId = vote?.submissionId ?? null;
@@ -59,6 +67,11 @@ export default function App() {
     setMaps((submissions ?? []).map((s) => ({ ...toBeatmap(s), isVoted: s.id === votedId })));
     setMySubmission(mine);
     setMyVote(votedId);
+    // The server already ordered these by the round's challenge requirement, so they
+    // are stored as they arrived and never re-sorted on the client.
+    setChallengeScores(scores ?? []);
+    setChallengeLoaded(true);
+    setMyScore(score);
     setLoaded(true);
   }, []);
 
@@ -167,6 +180,19 @@ export default function App() {
     return null;
   };
 
+  /**
+   * Imports the caller's osu! score for the round's winning beatmap. The request has
+   * no body — the map comes from the recorded winner and the player from the session —
+   * so there is nothing here to assemble, only the outcome to report.
+   */
+  const handleImportScore = async (): Promise<string | null> => {
+    const result = await api.challenge.importMine();
+    if (!result.ok) return result.error;
+    // The whole set reloads: one new score changes the order and every rank in it.
+    await refresh();
+    return null;
+  };
+
   const handleFavorite = (id: string) => {
     setMaps((prev) => prev.map((m) => (m.id === id ? { ...m, isFavorited: !m.isFavorited } : m)));
   };
@@ -212,6 +238,10 @@ export default function App() {
             voteError={voteError}
             onVote={handleVote}
             onDismissVoteError={() => setVoteError(null)}
+            challengeScores={challengeScores}
+            challengeLoaded={challengeLoaded}
+            myScore={myScore}
+            onImportScore={handleImportScore}
             onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}
