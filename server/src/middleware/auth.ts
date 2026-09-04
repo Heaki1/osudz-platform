@@ -50,3 +50,24 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     next();
   });
 }
+
+/** ISO 3166-1 alpha-2 of the community this platform serves. */
+const ELIGIBLE_COUNTRY = 'DZ';
+
+/**
+ * requireAuth plus the country gate. docs/my_plan.txt: Algerian players may
+ * submit and vote, everyone else may read and comment. Administrator-granted
+ * exceptions for diaspora players are specified there too but have no table yet,
+ * so today the osu! profile country is the whole rule.
+ */
+export async function requireEligible(req: Request, res: Response, next: NextFunction): Promise<void> {
+  await requireAuth(req, res, () => {
+    if (req.user?.country_code.trim().toUpperCase() !== ELIGIBLE_COUNTRY) {
+      res.status(403).json({
+        error: 'Submitting and voting are limited to Algerian osu! accounts',
+      });
+      return;
+    }
+    next();
+  });
+}

@@ -1,20 +1,25 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Phase } from '../../types';
-import { api } from '../../api/client';
+import { api, ApiSubmission } from '../../api/client';
 import { CurrentRound, formatDeadline, roundLabel, useCountdown } from '../../lib/round';
+import { beatmapUrl } from '../../lib/submission';
 import { AuthUser } from './NavHeader';
 import {
   Shield, ChevronRight, CheckCircle2, Circle, Clock,
   Star, Music2, AlertCircle, Users, Settings, Zap,
-  ToggleLeft, ToggleRight, Plus, X, Globe,
+  ToggleLeft, ToggleRight, Plus, X, Globe, Inbox, Link as LinkIcon,
 } from 'lucide-react';
 
 // ── TAB TYPES ────────────────────────────────────────────────────────────────
 
-type AdminTab = 'round' | 'eligibility' | 'rules' | 'challenge' | 'users' | 'config';
+type AdminTab = 'round' | 'submissions' | 'eligibility' | 'rules' | 'challenge' | 'users' | 'config';
+
+/** Tabs backed by a real endpoint. The rest are still UI only. */
+const WIRED_TABS: AdminTab[] = ['round', 'submissions'];
 
 const TABS: { key: AdminTab; label: string; icon: React.ReactNode }[] = [
   { key: 'round',       label: 'Round Control', icon: <Clock className="w-4 h-4" /> },
+  { key: 'submissions', label: 'Submissions',   icon: <Inbox className="w-4 h-4" /> },
   { key: 'eligibility', label: 'Eligibility',   icon: <Globe className="w-4 h-4" /> },
   { key: 'rules',       label: 'Beatmap Rules', icon: <Star className="w-4 h-4" /> },
   { key: 'challenge',   label: 'Challenge',     icon: <Zap className="w-4 h-4" /> },
@@ -269,6 +274,155 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
   );
 }
 
+
+// ── SUBMISSIONS REVIEW ────────────────────────────────────────────────────────
+
+const REVIEW_TONE: Record<ApiSubmission['reviewStatus'], string> = {
+  pending: 'bg-amber-400/10 border-amber-400/25 text-amber-400',
+  approved: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
+  rejected: 'bg-rose-500/10 border-rose-500/25 text-rose-400',
+};
+
+/**
+ * The gate between a submission existing and it being votable: GET
+ * /api/submissions only returns 'approved' rows, so nothing reaches the vote page
+ * until it is approved here.
+ */
+function SubmissionsTab({
+  round,
+  onReviewed,
+}: {
+  round: CurrentRound | null;
+  onReviewed: () => void | Promise<void>;
+}) {
+  const [rows, setRows] = useState<ApiSubmission[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const list = await api.admin.submissions();
+    setRows(list ?? []);
+    setLoadFailed(list === null);
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load, round?.id]);
+
+  const decide = async (id: number, status: 'approved' | 'rejected') => {
+    setBusyId(id);
+    setError(null);
+    const result = await api.admin.reviewSubmission(id, status);
+    if (result.ok) {
+      // Patch the one row rather than refetching, so the list does not reorder
+      // under the cursor mid-review.
+      setRows((prev) => prev.map((r) => (r.id === id ? result.data.submission : r)));
+      await onReviewed();
+    } else {
+      setError(result.status === 0 ? result.error : `${result.error} (HTTP ${result.status})`);
+    }
+    setBusyId(null);
+  };
+
+  const pending = rows.filter((r) => r.reviewStatus === 'pending');
+
+  if (!round) {
+    return (
+      <Section title="Submissions" description="Review queue for the open round.">
+        <p className="text-sm text-slate-500">No round is open, so there is nothing to review.</p>
+      </Section>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {error && <Banner tone="error" text={error} onDismiss={() => setError(null)} />}
+
+      <Section
+        title="Review Queue"
+        description={`${roundLabel(round)} — ${pending.length} awaiting review, ${rows.length} submitted in total.`}
+      >
+        {!loaded ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : loadFailed ? (
+          <p className="text-sm text-rose-400">Could not reach the API. Reload to try again.</p>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-slate-500">Nothing has been submitted to this round yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {rows.map((s) => (
+              <div key={s.id} className="flex items-start gap-4 p-3 bg-slate-900/40 border border-slate-800/70 rounded-xl">
+                {s.coverUrl && (
+                  <img
+                    src={s.coverUrl}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    className="w-24 h-14 rounded-lg object-cover flex-shrink-0 bg-slate-900"
+                  />
+                )}
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-bold text-white truncate">{s.title}</p>
+                    <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${REVIEW_TONE[s.reviewStatus]}`}>
+                      {s.reviewStatus}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 truncate">
+                    {s.artist} · [{s.difficultyName}] · mapped by {s.mapper}
+                  </p>
+                  <p className="text-[11px] font-mono text-slate-500 mt-1">
+                    ★ {s.stars.toFixed(2)} · {s.bpm} BPM · {s.length} · {s.mapStatus}
+                  </p>
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <span className="text-[10px] font-mono font-bold bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded text-slate-300">
+                      {s.modRequirement}
+                    </span>
+                    <span className="text-[10px] font-bold bg-amber-400/10 border border-amber-400/25 px-1.5 py-0.5 rounded text-amber-400">
+                      {s.challengeRequirement}
+                    </span>
+                    <span className="text-[10px] text-slate-600">by {s.submittedByName}</span>
+                    <a
+                      href={beatmapUrl(s)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[10px] text-slate-600 hover:text-amber-400 transition-colors"
+                    >
+                      <LinkIcon className="w-3 h-3" />
+                      osu!
+                    </a>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    disabled={busyId === s.id || s.reviewStatus === 'approved'}
+                    onClick={() => { void decide(s.id, 'approved'); }}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-black bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === s.id || s.reviewStatus === 'rejected'}
+                    onClick={() => { void decide(s.id, 'rejected'); }}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-black bg-rose-500/10 border border-rose-500/25 text-rose-400 hover:bg-rose-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
 
 // ── ELIGIBILITY ───────────────────────────────────────────────────────────────
 
@@ -777,15 +931,16 @@ export function AdminDashboard({ round, user, onRoundChange, onLogin }: AdminDas
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          {tab !== 'round' && (
+          {!WIRED_TABS.includes(tab) && (
             <div className="mb-5 flex items-start gap-2.5 bg-amber-400/8 border border-amber-400/20 rounded-xl px-4 py-3">
               <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-px" />
               <p className="text-xs text-amber-400/80">
-                This tab is UI only — nothing here is saved. Round Control is the one wired tab.
+                This tab is UI only — nothing here is saved. Round Control and Submissions are the wired ones.
               </p>
             </div>
           )}
           {tab === 'round'       && <RoundControl round={round} onRoundChange={onRoundChange} />}
+          {tab === 'submissions' && <SubmissionsTab round={round} onReviewed={onRoundChange} />}
           {tab === 'eligibility' && <EligibilityTab />}
           {tab === 'rules'       && <BeatmapRulesTab />}
           {tab === 'challenge'   && <ChallengeTab />}

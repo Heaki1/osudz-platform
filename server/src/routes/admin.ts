@@ -10,6 +10,13 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import { create, findCurrent, isRoundPhase, setPhase, toApiRound } from '../repo/rounds.js';
+import {
+  listForRound,
+  review,
+  toApiSubmission,
+  REVIEW_DECISIONS,
+  type ReviewDecision,
+} from '../repo/submissions.js';
 
 const router = Router();
 
@@ -154,16 +161,67 @@ router.post('/rounds', async (req, res) => {
   }
 });
 
-// GET /api/admin/submissions — all submissions including pending
-router.get('/submissions', (_req, res) => {
-  // TODO: implement with the submissions pass.
-  res.status(501).json({ error: 'Not implemented' });
+// GET /api/admin/submissions — every submission in a round, pending included.
+// Defaults to the open round; pass ?roundId= to review an earlier one.
+router.get('/submissions', async (req, res) => {
+  const raw = req.query.roundId;
+  if (raw !== undefined && !(typeof raw === 'string' && /^\d+$/.test(raw))) {
+    res.status(400).json({ error: 'roundId must be a positive integer' });
+    return;
+  }
+
+  try {
+    let roundId: number;
+    if (typeof raw === 'string') {
+      roundId = Number(raw);
+    } else {
+      const open = await findCurrent();
+      if (!open) {
+        res.json([]);
+        return;
+      }
+      roundId = open.id;
+    }
+
+    const rows = await listForRound(roundId);
+    res.json(rows.map(toApiSubmission));
+  } catch (err) {
+    fail(res, err, 'submission list');
+  }
 });
 
-// PATCH /api/admin/submissions/:id — approve or reject a submission
-router.patch('/submissions/:id', (_req, res) => {
-  // TODO: implement with the submissions pass.
-  res.status(501).json({ error: 'Not implemented' });
+// PATCH /api/admin/submissions/:id — approve or reject.
+// Only 'approved' rows reach GET /api/submissions, so this is the gate between a
+// submission existing and it being votable.
+router.patch('/submissions/:id', async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) {
+    res.status(400).json({ error: 'Submission id must be a positive integer' });
+    return;
+  }
+
+  const { status } = (req.body ?? {}) as { status?: unknown };
+  if (typeof status !== 'string' || !(REVIEW_DECISIONS as readonly string[]).includes(status)) {
+    res.status(400).json({ error: `status must be one of ${REVIEW_DECISIONS.join(', ')}` });
+    return;
+  }
+
+  // requireAdmin guarantees req.user, but the type does not know that.
+  const reviewer = req.user;
+  if (!reviewer) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  try {
+    const updated = await review(Number(req.params.id), status as ReviewDecision, reviewer.id);
+    if (!updated) {
+      res.status(404).json({ error: 'Submission not found' });
+      return;
+    }
+    res.json({ ok: true, submission: toApiSubmission(updated) });
+  } catch (err) {
+    fail(res, err, 'submission review');
+  }
 });
 
 export default router;

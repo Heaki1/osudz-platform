@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PlatformPage } from '../../types';
+import { api, ApiBeatmapPreview, ApiSubmission } from '../../api/client';
 import { CurrentRound, roundLabel } from '../../lib/round';
+import { beatmapUrl, previewToBeatmap, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';
@@ -55,6 +57,9 @@ function EligibilityPanel() {
 
 // ── MOD + CHALLENGE REQUIREMENT SELECTORS ────────────────────────────────────
 
+// Must stay in step with ALLOWED_MODS / ALLOWED_CHALLENGE_TYPES in
+// server/src/repo/submissions.ts, which validates what is sent. Making these
+// administrator-defined is specified in docs/my_plan.txt but not built yet.
 const MODS = ['NM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'];
 const CHALLENGE_TYPES = ['Full Combo', 'Top #1 Score', 'Best Accuracy', 'Lowest Miss Count'];
 
@@ -114,68 +119,54 @@ function RequirementsSelector({ mod, challengeType, onModChange, onTypeChange }:
   );
 }
 
-// ── MOCK BEATMAP PREVIEW ──────────────────────────────────────────────────────
-
-const mockFetchResult = {
-  title: 'Blue Zenith (Cut Ver.)',
-  artist: 'xi',
-  mapper: 'Sotarks',
-  stars: 7.98,
-  bpm: 200,
-  length: '1:03',
-  status: 'ranked' as const,
-  coverUrl: 'https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=400&h=200&fit=crop&auto=format',
-  difficultyName: "sanatint's Insane",
-  id: 'preview',
-};
-
 // ── URL TAB ───────────────────────────────────────────────────────────────────
 
-function UrlTab() {
+function UrlTab({ onSubmitted }: { onSubmitted: (submission: ApiSubmission) => void }) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<typeof mockFetchResult | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ApiBeatmapPreview | null>(null);
   const [mod, setMod] = useState<string | null>(null);
   const [challengeType, setChallengeType] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
 
-  const handleLoad = () => {
+  const handleLoad = async () => {
     if (!url.trim()) return;
     setLoading(true);
-    setTimeout(() => {
-      setPreview(mockFetchResult);
-      setLoading(false);
-    }, 800);
+    setError(null);
+    setPreview(null);
+    const result = await api.submissions.lookup(url);
+    if (result.ok) setPreview(result.data);
+    else setError(result.error);
+    setLoading(false);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!preview || !mod || !challengeType) return;
-    setSubmitted(true);
+    setSubmitting(true);
+    setError(null);
+    const result = await api.submissions.submit({
+      difficultyId: preview.difficultyId,
+      modRequirement: mod,
+      challengeRequirement: challengeType,
+    });
+    setSubmitting(false);
+    if (result.ok) onSubmitted(result.data);
+    else setError(result.error);
   };
-
-  if (submitted) {
-    return (
-      <div className="flex flex-col items-center gap-4 py-16 text-center">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
-          <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-        </div>
-        <h3 className="text-xl font-black text-white">Submitted!</h3>
-        <p className="text-sm text-slate-400 max-w-sm">
-          <span className="text-white font-bold">{preview?.title}</span> has been submitted for community voting. Good luck!
-        </p>
-        <button
-          type="button"
-          onClick={() => { setSubmitted(false); setUrl(''); setPreview(null); setMod(null); setChallengeType(null); }}
-          className="mt-2 px-6 py-2.5 bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 text-sm font-bold rounded-xl transition-all"
-        >
-          Submit another
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="flex items-start gap-2.5 bg-rose-500/10 border border-rose-500/25 rounded-xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+          <p className="text-xs text-rose-300 flex-1">{error}</p>
+          <button type="button" onClick={() => setError(null)} className="text-rose-400/60 hover:text-rose-300 flex-shrink-0">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* URL input */}
       <div>
         <p className="text-[10px] uppercase tracking-widest font-mono text-slate-600 mb-2">Beatmap URL</p>
@@ -186,13 +177,14 @@ function UrlTab() {
               type="text"
               value={url}
               onChange={(e) => { setUrl(e.target.value); setPreview(null); }}
-              placeholder="https://osu.ppy.sh/beatmapsets/…"
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleLoad(); }}
+              placeholder="https://osu.ppy.sh/beatmapsets/41823#osu/131891"
               className="w-full bg-[#0d1526] border border-slate-800 focus:border-amber-400/50 rounded-xl pl-10 pr-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none transition-colors"
             />
           </div>
           <button
             type="button"
-            onClick={handleLoad}
+            onClick={() => { void handleLoad(); }}
             disabled={!url.trim() || loading}
             className="flex items-center gap-2 px-5 py-3 bg-amber-400 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-sm rounded-xl transition-all flex-shrink-0"
           >
@@ -205,7 +197,7 @@ function UrlTab() {
           </button>
         </div>
         <p className="text-[11px] text-slate-600 mt-2">
-          Paste a link from osu.ppy.sh/beatmapsets or osu.ppy.sh/b/
+          Link a specific difficulty — the URL osu! shows once you have picked one.
         </p>
       </div>
 
@@ -217,7 +209,7 @@ function UrlTab() {
             <span className="text-xs font-bold text-emerald-400">Beatmap found — verify the details below</span>
           </div>
           <div className="max-w-sm">
-            <BeatmapCardPlatform beatmap={preview} />
+            <BeatmapCardPlatform beatmap={previewToBeatmap(preview)} />
           </div>
 
           <div className="h-px bg-slate-800" />
@@ -231,12 +223,12 @@ function UrlTab() {
 
           <button
             type="button"
-            onClick={handleSubmit}
-            disabled={!mod || !challengeType}
+            onClick={() => { void handleSubmit(); }}
+            disabled={!mod || !challengeType || submitting}
             className="flex items-center gap-2 px-6 py-3 bg-amber-400 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black text-sm rounded-xl transition-all"
           >
             <Upload className="w-4 h-4" />
-            Submit to Community Vote
+            {submitting ? 'Submitting…' : 'Submit to Community Vote'}
           </button>
           {(!mod || !challengeType) && (
             <p className="text-[11px] text-slate-600">Select a mod and challenge type to continue.</p>
@@ -421,6 +413,65 @@ function LoginGate({ onLogin }: { onLogin?: () => void }) {
 
 type SubmitTab = 'url' | 'favorites';
 
+const REVIEW_COPY: Record<ApiSubmission['reviewStatus'], { label: string; tone: string; blurb: string }> = {
+  pending: {
+    label: 'Awaiting review',
+    tone: 'bg-amber-400/10 border-amber-400/25 text-amber-400',
+    blurb: 'An administrator still has to approve this before it appears in the community vote.',
+  },
+  approved: {
+    label: 'Approved',
+    tone: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
+    blurb: 'This beatmap is in the community vote for this round. Good luck!',
+  },
+  rejected: {
+    label: 'Rejected',
+    tone: 'bg-rose-500/10 border-rose-500/25 text-rose-400',
+    blurb: 'An administrator rejected this entry, so it is not in the vote.',
+  },
+};
+
+/** One submission per user per round, so once there is one there is nothing to add. */
+function MySubmission({ submission }: { submission: ApiSubmission }) {
+  const copy = REVIEW_COPY[submission.reviewStatus];
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className={`text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full border ${copy.tone}`}>
+          {copy.label}
+        </span>
+        <p className="text-xs text-slate-500">{copy.blurb}</p>
+      </div>
+
+      <div className="max-w-sm">
+        <BeatmapCardPlatform beatmap={toBeatmap(submission)} />
+      </div>
+
+      <div className="bg-[#0d1526] border border-slate-800 rounded-2xl p-5 space-y-3">
+        <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono">Your challenge requirements</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-black font-mono bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-white">
+            {submission.modRequirement}
+          </span>
+          <span className="text-sm font-bold bg-amber-400/10 border border-amber-400/25 px-3 py-1 rounded-lg text-amber-400">
+            {submission.challengeRequirement}
+          </span>
+        </div>
+        <a
+          href={beatmapUrl(submission)}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-amber-400 transition-colors"
+        >
+          <Link className="w-3.5 h-3.5" />
+          Open on osu!
+        </a>
+      </div>
+    </div>
+  );
+}
+
 interface PlatformSubmitPageProps {
   round: CurrentRound | null;
   onNavigate: (page: PlatformPage) => void;
@@ -430,6 +481,25 @@ interface PlatformSubmitPageProps {
 
 export function PlatformSubmitPage({ round, onNavigate, user, onLogin }: PlatformSubmitPageProps) {
   const [tab, setTab] = useState<SubmitTab>('url');
+  const [mine, setMine] = useState<ApiSubmission | null>(null);
+  const [loadingMine, setLoadingMine] = useState(true);
+
+  // Reloads when the round changes, so archiving a round clears last month's entry.
+  useEffect(() => {
+    if (!user) {
+      setMine(null);
+      setLoadingMine(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMine(true);
+    api.submissions.mine().then((submission) => {
+      if (cancelled) return;
+      setMine(submission);
+      setLoadingMine(false);
+    });
+    return () => { cancelled = true; };
+  }, [user, round?.id]);
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 pb-16">
@@ -446,6 +516,13 @@ export function PlatformSubmitPage({ round, onNavigate, user, onLogin }: Platfor
         <LoginGate onLogin={onLogin} />
       ) : round?.phase !== 'submission' ? (
         <SubmissionClosed onNavigate={onNavigate} />
+      ) : loadingMine ? (
+        <div className="flex items-center gap-3 py-16 justify-center text-slate-600">
+          <span className="w-4 h-4 border-2 border-slate-700 border-t-slate-400 rounded-full animate-spin" />
+          <span className="text-sm">Checking your submission…</span>
+        </div>
+      ) : mine ? (
+        <MySubmission submission={mine} />
       ) : (
         <>
           <EligibilityPanel />
@@ -478,7 +555,7 @@ export function PlatformSubmitPage({ round, onNavigate, user, onLogin }: Platfor
             </button>
           </div>
 
-          {tab === 'url'       && <UrlTab />}
+          {tab === 'url'       && <UrlTab onSubmitted={setMine} />}
           {tab === 'favorites' && <FavoritesTab />}
         </>
       )}

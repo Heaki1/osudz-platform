@@ -34,6 +34,8 @@ export interface ApiRound {
   challengeEndsAt: string | null;
 }
 
+export type MapStatus = "ranked" | "loved" | "approved";
+
 export interface ApiSubmission {
   id: number;
   beatmapsetId: number;
@@ -41,10 +43,14 @@ export interface ApiSubmission {
   title: string;
   artist: string;
   mapper: string;
+  difficultyName: string;
+  /** The beatmap's own osu! status. Distinct from reviewStatus below. */
+  mapStatus: MapStatus;
   coverUrl: string;
   previewUrl: string;
   stars: number;
   bpm: number;
+  /** Display string ("2:19"); the column stores seconds. */
   length: string;
   cs: number;
   ar: number;
@@ -54,8 +60,35 @@ export interface ApiSubmission {
   modRequirement: string;
   submittedByName: string;
   voteCount: number;
+  /** Admin review state. Only 'approved' rows come back from GET /submissions. */
+  reviewStatus: "pending" | "approved" | "rejected";
+  submittedAt: string;
   isVoted?: boolean;
   isFavorited?: boolean;
+}
+
+/**
+ * What the server reads off the osu! API for a pasted URL. Not a submission yet —
+ * it has no id, and the row is built from a fresh lookup at submit time rather
+ * than from this.
+ */
+export interface ApiBeatmapPreview {
+  difficultyId: number;
+  beatmapsetId: number;
+  title: string;
+  artist: string;
+  mapper: string;
+  difficultyName: string;
+  mapStatus: MapStatus;
+  coverUrl: string;
+  previewUrl: string;
+  stars: number;
+  bpm: number;
+  lengthSeconds: number;
+  cs: number | null;
+  ar: number | null;
+  od: number | null;
+  hp: number | null;
 }
 
 export type ApiResult<T> =
@@ -125,13 +158,17 @@ export const api = {
 
   // ── Submissions ────────────────────────────────────────────────────────────
   submissions: {
+    /** Approved entries in the open round; [] when no round is open. */
     list: () => get<ApiSubmission[]>("/submissions"),
     get: (id: number) => get<ApiSubmission>(`/submissions/${id}`),
+    /** The caller's own entry, pending included — GET /submissions hides it. */
+    mine: () => get<ApiSubmission | null>("/submissions/mine"),
+    /** Resolves a pasted osu! URL to beatmap metadata for the preview card. */
+    lookup: (url: string) => send<ApiBeatmapPreview>("POST", "/submissions/lookup", { url }),
     submit: (body: {
-      beatmapsetId: number;
       difficultyId: number;
-      challengeRequirement: string;
       modRequirement: string;
+      challengeRequirement: string;
     }) => send<ApiSubmission>("POST", "/submissions", body),
   },
 
@@ -160,9 +197,11 @@ export const api = {
       votingDays?: number;
       challengeDays?: number;
     }) => send<ApiRound>("POST", "/admin/rounds", body ?? {}),
-    submissions: () => get<ApiSubmission[]>("/admin/submissions"),
+    /** Every submission in a round, pending included. Defaults to the open round. */
+    submissions: (roundId?: number) =>
+      get<ApiSubmission[]>(roundId === undefined ? "/admin/submissions" : `/admin/submissions?roundId=${roundId}`),
     reviewSubmission: (id: number, status: "approved" | "rejected") =>
-      send<{ ok: boolean }>("PATCH", `/admin/submissions/${id}`, { status }),
+      send<{ ok: boolean; submission: ApiSubmission }>("PATCH", `/admin/submissions/${id}`, { status }),
   },
 
   // ── Health ─────────────────────────────────────────────────────────────────

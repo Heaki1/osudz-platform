@@ -6,9 +6,9 @@ import { SearchPage } from './components/platform/SearchPage';
 import { AdminDashboard } from './components/platform/AdminDashboard';
 import { PlatformSubmitPage } from './components/platform/PlatformSubmitPage';
 import { ArchivePage } from './components/platform/ArchivePage';
-import { votingBeatmaps } from './components/platform/sampleData';
 import { api, ApiUser } from './api/client';
 import { CurrentRound, toCurrentRound } from './lib/round';
+import { toBeatmap } from './lib/submission';
 import { Beatmap, Phase, PlatformPage } from './types';
 
 type PlayState = { id: string; progress: number; audio?: HTMLAudioElement };
@@ -25,7 +25,7 @@ export default function App() {
   const [platformUser, setPlatformUser] = useState<AuthUser | null>(null);
   const [round, setRound] = useState<CurrentRound | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [maps, setMaps] = useState<Beatmap[]>(votingBeatmaps);
+  const [maps, setMaps] = useState<Beatmap[]>([]);
   const [playState, setPlayState] = useState<PlayState | null>(null);
 
   // The round is the single source of the phase. With no round open — or with the
@@ -33,8 +33,15 @@ export default function App() {
   // their actual behaviour off `round` being null.
   const phase: Phase = round?.phase ?? 'submission';
 
-  const refreshRound = useCallback(async () => {
-    setRound(toCurrentRound(await api.rounds.current()));
+  // Round and approved submissions travel together: approving an entry or
+  // advancing a phase changes both, so admin actions reload the pair.
+  const refresh = useCallback(async () => {
+    const [current, submissions] = await Promise.all([
+      api.rounds.current(),
+      api.submissions.list(),
+    ]);
+    setRound(toCurrentRound(current));
+    setMaps((submissions ?? []).map(toBeatmap));
   }, []);
 
   // Restore the session on load. api.auth.me() resolves to null both when signed
@@ -45,7 +52,7 @@ export default function App() {
       if (user) setPlatformUser(toAuthUser(user));
     });
 
-    void refreshRound();
+    void refresh();
 
     // The OAuth callback redirects here with ?auth=failed&reason=… on failure.
     const params = new URLSearchParams(window.location.search);
@@ -53,7 +60,7 @@ export default function App() {
       setAuthError(params.get('reason') ?? 'unknown');
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, [refreshRound]);
+  }, [refresh]);
 
   const handleLogin = () => {
     window.location.href = api.auth.loginUrl();
@@ -146,6 +153,7 @@ export default function App() {
         {platformPage === 'dashboard' && (
           <DashboardPage
             round={round}
+            maps={maps}
             onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}
@@ -178,7 +186,7 @@ export default function App() {
           <AdminDashboard
             round={round}
             user={platformUser}
-            onRoundChange={refreshRound}
+            onRoundChange={refresh}
             onLogin={handleLogin}
           />
         )}

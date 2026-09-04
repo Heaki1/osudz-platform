@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Phase, PlatformPage } from '../../types';
+import { Beatmap, Phase, PlatformPage } from '../../types';
 import { CurrentRound, roundLabel, useCountdown } from '../../lib/round';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
-import { favoriteBeatmaps, votingBeatmaps, challengeScores } from './sampleData';
+import { favoriteBeatmaps, challengeScores } from './sampleData';
 import { AuthUser } from './NavHeader';
 import {
   Trophy, Crown, Upload, ChevronRight, RefreshCw,
@@ -185,6 +185,8 @@ function ChallengeLeaderboard({ roundNumber }: { roundNumber: number }) {
 
 interface DashboardPageProps {
   round: CurrentRound | null;
+  /** Approved submissions in the open round. Empty until an admin approves one. */
+  maps: Beatmap[];
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
@@ -205,7 +207,7 @@ function NoActiveRound() {
   );
 }
 
-export function DashboardPage({ round, onNavigate, user, onLogin }: DashboardPageProps) {
+export function DashboardPage({ round, maps, onNavigate, user, onLogin }: DashboardPageProps) {
   const [userVote, setUserVote] = useState<string | null>(null);
   const [favorites, setFavorites] = useState(favoriteBeatmaps);
   // One ticking countdown for the page, called before the early return below so
@@ -216,7 +218,10 @@ export function DashboardPage({ round, onNavigate, user, onLogin }: DashboardPag
     setFavorites((prev) => prev.map((b) => (b.id === id ? { ...b, isFavorited: !b.isFavorited } : b)));
   };
 
-  const leadingMap = votingBeatmaps[0];
+  // Null whenever nothing is approved yet, so every use below is guarded.
+  const leadingMap: Beatmap | null = maps.length
+    ? maps.reduce((best, m) => ((m.voteCount ?? 0) > (best.voteCount ?? 0) ? m : best))
+    : null;
 
   if (!round) {
     return (
@@ -345,7 +350,7 @@ export function DashboardPage({ round, onNavigate, user, onLogin }: DashboardPag
                     You have voted
                   </p>
                   {(() => {
-                    const v = votingBeatmaps.find((b) => b.id === userVote);
+                    const v = maps.find((b) => b.id === userVote);
                     return v ? <BeatmapCardPlatform beatmap={v} voted onVote={() => setUserVote(null)} showVoteButton /> : null;
                   })()}
                 </>
@@ -377,14 +382,20 @@ export function DashboardPage({ round, onNavigate, user, onLogin }: DashboardPag
               <div className="flex items-center gap-2 mb-4">
                 <Crown className="w-4 h-4 text-amber-400" />
                 <p className="text-[10px] uppercase tracking-widest text-amber-400/80 font-mono font-bold">Currently Leading</p>
-                <span className="ml-auto text-[10px] font-mono text-slate-600">{leadingMap.voteCount} votes</span>
+                {leadingMap && (
+                  <span className="ml-auto text-[10px] font-mono text-slate-600">{leadingMap.voteCount ?? 0} votes</span>
+                )}
               </div>
-              <BeatmapCardPlatform
-                beatmap={leadingMap}
-                showVoteButton
-                voted={userVote === leadingMap.id}
-                onVote={() => setUserVote(userVote === leadingMap.id ? null : leadingMap.id)}
-              />
+              {leadingMap ? (
+                <BeatmapCardPlatform
+                  beatmap={leadingMap}
+                  showVoteButton
+                  voted={userVote === leadingMap.id}
+                  onVote={() => setUserVote(userVote === leadingMap.id ? null : leadingMap.id)}
+                />
+              ) : (
+                <p className="text-sm text-slate-500 py-8 text-center">Nothing has been approved for voting yet.</p>
+              )}
             </div>
           </div>
 
@@ -395,10 +406,10 @@ export function DashboardPage({ round, onNavigate, user, onLogin }: DashboardPag
                 <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-1">{roundLabel(round)}</p>
                 <h2 className="text-xl font-black text-white">All Submitted Beatmaps</h2>
               </div>
-              <span className="text-xs text-slate-600 font-mono">{votingBeatmaps.length} beatmaps</span>
+              <span className="text-xs text-slate-600 font-mono">{maps.length} beatmaps</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {votingBeatmaps.map((b) => (
+              {maps.map((b) => (
                 <BeatmapCardPlatform
                   key={b.id}
                   beatmap={b}
@@ -415,7 +426,10 @@ export function DashboardPage({ round, onNavigate, user, onLogin }: DashboardPag
       {/* ── CHALLENGE PHASE ───────────────────────────────────────────── */}
       {phase === 'challenge' && (
         <div className="space-y-8">
-          {/* Winning beatmap hero */}
+          {/* Winning beatmap hero. Reaching the challenge phase with nothing
+              approved is degenerate, but a phase can be advanced by hand, so the
+              map-dependent half is guarded. */}
+          {leadingMap ? (
           <div className="relative rounded-2xl overflow-hidden border border-purple-500/20 min-h-[220px]">
             <div className="absolute inset-0">
               <img
@@ -473,6 +487,25 @@ export function DashboardPage({ round, onNavigate, user, onLogin }: DashboardPag
               </div>
             </div>
           </div>
+          ) : (
+            <div className="bg-[#0d1526] border border-slate-800 rounded-2xl px-8 py-10 flex items-center justify-between gap-6 flex-wrap">
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-amber-400 uppercase font-mono">
+                  Monthly Challenge · {roundLabel(round)}
+                </span>
+                <p className="text-sm text-slate-400 mt-2 max-w-md">
+                  No approved beatmap is on record for this round, so there is no challenge map to show.
+                </p>
+              </div>
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl px-6 py-4 text-right flex-shrink-0">
+                <div className="flex items-center gap-2 justify-end mb-1.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider">Challenge ends in</span>
+                </div>
+                <div className="text-3xl font-black font-mono text-purple-400">{countdown}</div>
+              </div>
+            </div>
+          )}
 
           {/* My rank + leaderboard */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
