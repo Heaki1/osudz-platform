@@ -65,3 +65,66 @@ export async function retract(userId: number, roundId: number): Promise<boolean>
   );
   return (rowCount ?? 0) > 0;
 }
+
+// ── Moderation view ──────────────────────────────────────────────────────────
+//
+// The only read in this project that puts a voter and their choice in the same row.
+// It exists for administrators investigating a dispute, and nothing public may use it:
+// docs/todo.txt B11 makes ballot secrecy a rule, and the public surfaces keep to
+// aggregates — voteCount is a COUNT(*), GET /votes/my is per-caller, and the "You" pill
+// on the vote page marks only the caller's own row.
+
+export interface VoteAuditRow {
+  vote_id: number;
+  user_id: number;
+  username: string;
+  osu_id: string;
+  avatar_url: string | null;
+  country_code: string;
+  submission_id: number;
+  submission_title: string;
+  submission_artist: string;
+  difficulty_name: string;
+  created_at: Date;
+}
+
+/** Every vote in one round, with who cast it and what for. Newest first. */
+export async function listForRound(roundId: number): Promise<VoteAuditRow[]> {
+  const { rows } = await pool.query<VoteAuditRow>(
+    `SELECT v.id           AS vote_id,
+            u.id           AS user_id,
+            u.username,
+            u.osu_id,
+            u.avatar_url,
+            u.country_code,
+            s.id           AS submission_id,
+            s.title        AS submission_title,
+            s.artist       AS submission_artist,
+            s.difficulty_name,
+            v.created_at
+       FROM votes v
+       JOIN users u       ON u.id = v.user_id
+       JOIN submissions s ON s.id = v.submission_id
+      WHERE v.round_id = $1
+      ORDER BY v.created_at DESC, v.id DESC`,
+    [roundId]
+  );
+  return rows;
+}
+
+/** Maps a row to the ApiVoteAudit DTO declared in src/api/client.ts. */
+export function toApiVoteAudit(row: VoteAuditRow) {
+  return {
+    voteId: row.vote_id,
+    userId: row.user_id,
+    username: row.username,
+    osuId: Number(row.osu_id),
+    avatarUrl: row.avatar_url ?? '',
+    country: row.country_code,
+    submissionId: row.submission_id,
+    submissionTitle: row.submission_title,
+    submissionArtist: row.submission_artist,
+    difficultyName: row.difficulty_name,
+    castAt: row.created_at.toISOString(),
+  };
+}

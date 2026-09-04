@@ -154,6 +154,27 @@ export interface ApiChallengeScore {
   submittedAt: string;
 }
 
+/**
+ * One vote with the account that cast it — GET /admin/votes only.
+ *
+ * Ballot secrecy is a rule, not an oversight: no public endpoint carries voter identity,
+ * and this shape exists so an administrator can investigate a dispute. Do not reuse it
+ * on a public surface.
+ */
+export interface ApiVoteAudit {
+  voteId: number;
+  userId: number;
+  username: string;
+  osuId: number;
+  avatarUrl: string;
+  country: string;
+  submissionId: number;
+  submissionTitle: string;
+  submissionArtist: string;
+  difficultyName: string;
+  castAt: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -296,6 +317,12 @@ export const api = {
         "/admin/round/winner",
         submissionId === undefined ? {} : { submissionId }
       ),
+    /**
+     * Who voted for what, for moderation. Admin-only by construction — nothing public
+     * exposes voter identity.
+     */
+    votes: (roundId?: number) =>
+      get<ApiVoteAudit[]>(roundId === undefined ? "/admin/votes" : `/admin/votes?roundId=${roundId}`),
     /** Submission ids a tied round may be resolved to. */
     tiebreakEntries: () => get<number[]>("/admin/round/tiebreak"),
     /**

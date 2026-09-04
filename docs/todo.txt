@@ -384,7 +384,21 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: pause the round on a tie until an admin decides"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  B11 Ballot secrecy, with an admin moderation view                      [TODO]
+  B11 Ballot secrecy, with an admin moderation view                      [DONE]
+      LANDED: repo/votes.ts gained listForRound — the only read in this project that puts
+      a voter and their choice in the same row — plus GET /api/admin/votes?roundId=,
+      behind the requireAdmin that gates that whole router. A "Ballot" panel in Round
+      Control renders it, COLLAPSED BY DEFAULT and behind a deliberate click: an
+      administrator opening Round Control to advance a phase has no business reading the
+      ballot, and making it a choice keeps that distinction visible.
+      SECRECY RE-CONFIRMED after the change, which is what this item's VERIFY asked for:
+      toApiVoteAudit and VoteAuditRow are referenced from routes/admin.ts and nowhere
+      else, so no public route can carry voter identity. The public surfaces are unchanged
+      — voteCount is still a COUNT(*), GET /votes/my is still per-caller, and the "You"
+      pill still marks only the caller's own row. The public submission read does carry
+      submitted_by_name, but that is the SUBMITTER, which the vote page shows on purpose;
+      it says nothing about who voted.
+      Unauthenticated GET /api/admin/votes answers 401, verified live.
       DECIDED  Normal users must never see which account voted for which map.
                Only administrators may see voter-to-map detail, and only for
                moderation. Aggregate totals stay public exactly as the vote page

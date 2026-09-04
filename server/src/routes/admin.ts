@@ -30,6 +30,7 @@ import {
 } from '../repo/submissions.js';
 import { findByOsuId } from '../repo/users.js';
 import { announceBallotClosed, announcePhase, announceWinner } from '../services/discord.js';
+import { listForRound as listVotes, toApiVoteAudit } from '../repo/votes.js';
 import {
   qualifies,
   toApiChallengeScore,
@@ -222,6 +223,38 @@ router.get('/round/tiebreak', async (_req, res) => {
     res.json(await listTiebreakEntries(open.id));
   } catch (err) {
     fail(res, err, 'tiebreak list');
+  }
+});
+
+// GET /api/admin/votes?roundId= — who voted for what.
+//
+// The only endpoint anywhere that pairs a voter with their choice. It is behind
+// requireAdmin like everything in this file, and exists for investigating a dispute:
+// docs/todo.txt B11 keeps ballot secrecy for everyone else, and no public route gains
+// voter identity because of this one.
+router.get('/votes', async (req, res) => {
+  const raw = req.query.roundId;
+  let roundId: number;
+
+  if (raw === undefined) {
+    const open = await findCurrent().catch(() => null);
+    if (!open) {
+      res.json([]);
+      return;
+    }
+    roundId = open.id;
+  } else if (typeof raw === 'string' && /^\d+$/.test(raw)) {
+    roundId = Number(raw);
+  } else {
+    res.status(400).json({ error: 'roundId must be a positive integer' });
+    return;
+  }
+
+  try {
+    const rows = await listVotes(roundId);
+    res.json(rows.map(toApiVoteAudit));
+  } catch (err) {
+    fail(res, err, 'vote audit');
   }
 });
 

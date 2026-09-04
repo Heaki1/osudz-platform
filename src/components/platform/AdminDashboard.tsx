@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Phase } from '../../types';
-import { api, ApiSubmission } from '../../api/client';
+import { api, ApiSubmission, ApiVoteAudit } from '../../api/client';
 import { CurrentRound, formatDeadline, roundLabel, useCountdown } from '../../lib/round';
 import { beatmapUrl } from '../../lib/submission';
 import { AuthUser } from './NavHeader';
@@ -8,7 +8,7 @@ import {
   Shield, ChevronRight, CheckCircle2, Circle, Clock,
   Star, Music2, AlertCircle, Users, Settings, Zap,
   ToggleLeft, ToggleRight, Plus, X, Globe, Inbox, Link as LinkIcon,
-  Trophy, Scale,
+  Trophy, Scale, Eye,
 } from 'lucide-react';
 
 // ── TAB TYPES ────────────────────────────────────────────────────────────────
@@ -251,6 +251,102 @@ function WinnerPanel({
   );
 }
 
+// ── BALLOT MODERATION ─────────────────────────────────────────────────────────
+//
+// Who voted for what. The only place in the app where a voter and their choice appear
+// together: ballot secrecy is a rule for everyone else, and no public endpoint carries
+// voter identity. This exists for investigating a dispute.
+//
+// Collapsed by default on purpose. An administrator opening Round Control to advance a
+// phase has no business reading the ballot, and making it a deliberate click keeps that
+// distinction visible.
+
+function BallotModeration({ round }: { round: CurrentRound }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<ApiVoteAudit[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void (async () => {
+      const list = await api.admin.votes();
+      if (!live) return;
+      setRows(list ?? []);
+      setFailed(list === null);
+    })();
+    return () => { live = false; };
+  }, [open, round.id]);
+
+  return (
+    <Section
+      title="Ballot"
+      description="Who voted for what, for moderation only. Players never see this — the public surfaces show totals and nothing else."
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 text-xs font-bold transition-all"
+      >
+        <Eye className="w-3.5 h-3.5" />
+        {open ? 'Hide the ballot' : 'Show who voted for what'}
+      </button>
+
+      {open && (
+        rows === null ? (
+          <p className="text-sm text-slate-500">Loading the ballot…</p>
+        ) : failed ? (
+          <p className="text-sm text-rose-400">Could not read the ballot. Reload to try again.</p>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-slate-500">No votes have been cast in this round.</p>
+        ) : (
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-slate-600">
+              {rows.length} {rows.length === 1 ? 'vote' : 'votes'}, newest first.
+            </p>
+            {rows.map((row) => (
+              <div
+                key={row.voteId}
+                className="flex items-center gap-3 px-3 py-2 bg-slate-900/40 border border-slate-800/70 rounded-xl"
+              >
+                {row.avatarUrl ? (
+                  <img
+                    src={row.avatarUrl}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    className="w-7 h-7 rounded-full flex-shrink-0 object-cover bg-slate-800"
+                  />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-400 flex-shrink-0">
+                    {row.username.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-white truncate">
+                    {row.username}
+                    <span className="text-slate-600 font-mono font-normal ml-1.5">
+                      {row.country} · {row.osuId}
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-slate-500 truncate">
+                    voted for {row.submissionArtist} - {row.submissionTitle} [{row.difficultyName}]
+                  </p>
+                </div>
+                <span className="text-[10px] font-mono text-slate-600 flex-shrink-0">
+                  {new Date(row.castAt).toLocaleString(undefined, {
+                    dateStyle: 'short',
+                    timeStyle: 'short',
+                  })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+    </Section>
+  );
+}
+
 // ── ROUND CONTROL ─────────────────────────────────────────────────────────────
 
 function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; onRoundChange: () => void | Promise<void> }) {
@@ -441,6 +537,8 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
           </Section>
 
           {ballotClosed && <WinnerPanel round={round} onRoundChange={onRoundChange} />}
+
+          {round.phase !== 'submission' && <BallotModeration round={round} />}
 
           <Section
             title="Schedule"
