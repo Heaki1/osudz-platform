@@ -1,6 +1,6 @@
 import React from 'react';
 import { Phase, PlatformPage } from '../../types';
-import { CurrentRound, isPageOpen, useCountdown } from '../../lib/round';
+import { CurrentRound, isBallotOpen, isPageOpen, useCountdown } from '../../lib/round';
 import { Home, Upload, Trophy, Search, Shield, LogOut, ChevronDown, Archive } from 'lucide-react';
 
 export interface AuthUser {
@@ -65,6 +65,13 @@ interface NavHeaderProps {
 export function NavHeader({ page, phase, round, onNavigate, user, onLogin, onLogout }: NavHeaderProps) {
   const cfg = phaseConfig[phase];
   const countdown = useCountdown(round?.endsAt);
+  /**
+   * The ballot closes on winnerStatus while the phase stays 'voting', so the badge
+   * asks the same question the vote page does rather than trusting the phase. Without
+   * this it reads "VOTING PHASE · Ends in ended" on every page, with a pulsing dot,
+   * while the round is actually waiting on an administrator.
+   */
+  const frozen = round?.phase === 'voting' && !isBallotOpen(round);
 
   return (
     <header className="sticky top-0 z-50 bg-[#060c18]/95 backdrop-blur-md border-b border-slate-800/70">
@@ -113,13 +120,27 @@ export function NavHeader({ page, phase, round, onNavigate, user, onLogin, onLog
 
         {/* Phase badge — driven by the round; without one there is nothing to count down to. */}
         {round ? (
-          <div className={`hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-full border ${cfg.badgeBorder} ${cfg.badgeBg}`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot} animate-pulse`} />
-            <span className={`text-[10px] font-black tracking-widest uppercase font-mono ${cfg.color}`}>
-              {cfg.label}
+          <div
+            className={`hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-full border ${
+              frozen ? 'border-slate-700 bg-slate-800/40' : `${cfg.badgeBorder} ${cfg.badgeBg}`
+            }`}
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${frozen ? 'bg-slate-500' : `${cfg.dot} animate-pulse`}`} />
+            <span
+              className={`text-[10px] font-black tracking-widest uppercase font-mono ${
+                frozen ? 'text-slate-400' : cfg.color
+              }`}
+            >
+              {frozen ? 'VOTING CLOSED' : cfg.label}
             </span>
             <span className="text-slate-600">·</span>
-            <span className="text-[10px] text-slate-400 font-mono">Ends in {countdown}</span>
+            <span className="text-[10px] text-slate-400 font-mono">
+              {frozen
+                ? round.winnerStatus === 'tiebreak'
+                  ? 'tie unresolved'
+                  : 'winner pending'
+                : `Ends in ${countdown}`}
+            </span>
           </div>
         ) : (
           <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-full border border-slate-700 bg-slate-800/40">

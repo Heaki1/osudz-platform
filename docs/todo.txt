@@ -1171,10 +1171,18 @@ fix it as its own item with its own commit.
     a beatmap, or is a user token required? One curl settles it; the command is in
     E2. Its answer decides whether the A5 token question reaches scores too.
 
-  - Does keeping phase at 'voting' during the pending window mislead any existing
-    consumer? Every reader of phase has to be checked before D2 lands — the nav
-    badge, the countdown past voting_ends_at, the Vote tab's open state, and the
-    dashboard's voting-phase branch are the four to look at first.
+  - ANSWERED. Does keeping phase at 'voting' during the pending window mislead any
+    existing consumer? It misled three of the four, and all four are now fixed.
+      nav badge          read "VOTING PHASE - Ends in ended" with a pulsing dot on
+                         every page. Now "VOTING CLOSED - winner pending" or "- tie
+                         unresolved", dot still.
+      the countdown      the vote page header counted toward a dead deadline, or
+                         printed 'ended'. Now "Voting closed" (B7).
+      Vote tab state     correct as it stood, and deliberately left open: the page is
+                         where the final standings are read.
+      dashboard branch   showed "Currently Leading" and live vote buttons. Now the
+                         recorded winner or the tie, with every action refused (D3).
+    The model itself held up — nothing needed a new phase value.
 
 
 # STATE OF THE LOCAL INSTANCE, 2026-09-04
