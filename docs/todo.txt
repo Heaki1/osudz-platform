@@ -663,7 +663,22 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: record a pending winner when voting closes"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  D3  Serve and consume the stored winner                                [TODO]
+  D3  Serve and consume the stored winner                                [DONE]
+      LANDED: GET /api/rounds/:id now returns `winner`, the whole submission rather
+      than an id, so the archive will not need a request per round. It is read by id,
+      never recomputed — the winner is the entry an administrator approved, and a
+      later retraction or rejection does not move it. Returned whether pending or
+      official, since winnerStatus travels with it; null while a tie is unresolved.
+      ApiRoundDetail is a separate DTO so /rounds and /rounds/current stay lean.
+      lib/round.ts gained isBallotOpen — phase 'voting' AND winnerStatus 'none' —
+      which is the client's reading of the rule routes/votes.ts enforces. The
+      dashboard reads it in one place: every vote surface, the retract button on an
+      already-cast vote included, refuses once the ballot closes and says why.
+      The challenge hero reads the recorded winner instead of recomputing the live
+      leader, and the standings panel beside "Your Vote" now has three honest states
+      — leading, winner pending approval with the frozen count, or tied and waiting
+      on an administrator. The challenge leaderboard half of the old TODO stays open;
+      it is E1's, not this item's.
       WHAT   ApiRound gains winner_status and the winner fields; CurrentRound
              carries them through toCurrentRound; GET /api/rounds/:id returns the
              winning submission plus the tally, filling the TODO at

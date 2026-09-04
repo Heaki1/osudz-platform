@@ -52,6 +52,19 @@ export interface ApiRound {
   winnerApprovedAt: string | null;
 }
 
+/**
+ * One round with the entry recorded as its winner — GET /rounds/:id only. The list
+ * and current endpoints stay lean; a caller showing one round (the archive, mainly)
+ * is the one that needs the map rather than an id.
+ */
+export interface ApiRoundDetail extends ApiRound {
+  /**
+   * The recorded winner, pending or official — winnerStatus says which. Null when
+   * nothing is recorded yet, and while a tie is unresolved.
+   */
+  winner: ApiSubmission | null;
+}
+
 export type MapStatus = "ranked" | "loved" | "approved";
 
 export interface ApiSubmission {
@@ -170,7 +183,8 @@ export const api = {
     /** Resolves to null both when no round is open and when the API is down. */
     current: () => get<ApiRound>("/rounds/current"),
     list: () => get<ApiRound[]>("/rounds"),
-    get: (id: number) => get<ApiRound>(`/rounds/${id}`),
+    /** One round plus its recorded winner. */
+    get: (id: number) => get<ApiRoundDetail>(`/rounds/${id}`),
   },
 
   // ── Submissions ────────────────────────────────────────────────────────────

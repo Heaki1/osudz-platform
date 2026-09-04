@@ -74,6 +74,17 @@ export function toCurrentRound(round: ApiRound | null): CurrentRound | null {
 export const roundLabel = (round: CurrentRound | null): string =>
   round ? `Round ${round.roundNumber} · ${round.month} ${round.year}` : 'No active round';
 
+/**
+ * Whether a vote may still be cast or retracted.
+ *
+ * The phase alone does not answer this: it stays 'voting' right through the pending
+ * and tiebreak window, while routes/votes.ts refuses both writes the moment
+ * winnerStatus leaves 'none'. Every surface that offers a vote button reads this, so
+ * the UI cannot go on offering a write the server has already closed.
+ */
+export const isBallotOpen = (round: CurrentRound | null): boolean =>
+  round?.phase === 'voting' && round.winnerStatus === 'none';
+
 /** An absolute deadline, for the admin schedule view. */
 export const formatDeadline = (endsAt: string | null): string =>
   endsAt

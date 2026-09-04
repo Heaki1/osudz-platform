@@ -4,6 +4,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { findById, findCurrent, listAll, toApiRound } from '../repo/rounds.js';
+import { findById as findSubmission, toApiSubmission } from '../repo/submissions.js';
 
 const router = Router();
 
@@ -33,10 +34,19 @@ router.get('/', async (_req, res) => {
   }
 });
 
-// GET /api/rounds/:id — one round.
-// TODO: the archive also wants the winning submission and the challenge
-// leaderboard for this round. Both need data that does not exist yet (no votes
-// are cast and challenge_scores is empty), so this returns round metadata only.
+// GET /api/rounds/:id — one round, with the entry recorded as its winner.
+//
+// The winner is read by id, never recomputed from the vote table: it is the entry an
+// administrator approved, and a later retraction or rejection does not move it. It
+// comes back as a whole submission rather than an id because the archive shows the
+// map, and would otherwise need a second request per round.
+//
+// winner_status says how far it has got, so the row is returned whether it is
+// pending or official — the caller decides how to label it. A tied round has no
+// recorded entry yet, so winner is null there.
+//
+// TODO: the archive also wants this round's challenge leaderboard. challenge_scores
+// has no read path yet (roadmap E1), so it is absent rather than empty.
 router.get('/:id', async (req, res) => {
   if (!/^\d+$/.test(req.params.id)) {
     res.status(400).json({ error: 'Round id must be a positive integer' });
@@ -49,7 +59,11 @@ router.get('/:id', async (req, res) => {
       res.status(404).json({ error: 'Round not found' });
       return;
     }
-    res.json(toApiRound(row));
+
+    const winner =
+      row.winning_submission_id === null ? null : await findSubmission(row.winning_submission_id);
+
+    res.json({ ...toApiRound(row), winner: winner ? toApiSubmission(winner) : null });
   } catch (err) {
     dbDown(res, err, 'get');
   }

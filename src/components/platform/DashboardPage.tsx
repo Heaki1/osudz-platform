@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Beatmap, Phase, PlatformPage } from '../../types';
 import { ApiSubmission } from '../../api/client';
-import { CurrentRound, formatDeadline, roundLabel, useCountdown } from '../../lib/round';
+import { CurrentRound, formatDeadline, isBallotOpen, roundLabel, useCountdown } from '../../lib/round';
 import { beatmapUrl, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { WithdrawButton } from './WithdrawButton';
@@ -412,12 +412,20 @@ export function DashboardPage({
   // The vote lives on the server. This page used to keep its own useState for it,
   // which reset on every mount and never agreed with the vote page.
   const canVote = user?.canVote ?? false;
+  // The ballot closes on winnerStatus while the phase is still 'voting', so every
+  // vote surface below asks this rather than reading the phase.
+  const ballotOpen = isBallotOpen(round);
   const myMapId = myVote === null ? null : String(myVote);
   const votedMap = myMapId === null ? null : maps.find((b) => b.id === myMapId) ?? null;
   const ownMapId = mySubmission === null ? null : String(mySubmission.id);
 
-  /** Why this entry cannot be voted for, or undefined when it can. */
+  /**
+   * Why this entry cannot be voted for, or undefined when it can. The closed ballot
+   * comes first: it is the one refusal that applies to everybody, including the
+   * retraction of a vote already cast.
+   */
   const refusal = (id: string): string | undefined => {
+    if (!ballotOpen) return 'Voting has closed for this round';
     if (!canVote) return 'Voting is available to Algerian osu! players';
     if (id === ownMapId) return 'You cannot vote for your own submission';
     return undefined;
@@ -427,6 +435,48 @@ export function DashboardPage({
   const leadingMap: Beatmap | null = maps.length
     ? maps.reduce((best, m) => ((m.voteCount ?? 0) > (best.voteCount ?? 0) ? m : best))
     : null;
+
+  /**
+   * The entry the server recorded, not the one leading a live count. Once the ballot
+   * closes the two can differ — a vote retracted before the freeze, an entry rejected
+   * after winning — and the recorded one is the fact. Null while a tie is unresolved,
+   * or when the winner is no longer among the approved entries this page was given.
+   */
+  const recordedWinner: Beatmap | null =
+    round?.winningSubmissionId == null
+      ? null
+      : maps.find((m) => m.id === String(round.winningSubmissionId)) ?? null;
+
+  /**
+   * The panel beside "Your Vote": the live leader while the ballot is open, the
+   * recorded winner and its frozen count once it is closed, and an honest line while
+   * a tie is unresolved. One derivation so the heading, the count and the card cannot
+   * disagree about which of those three the round is in.
+   */
+  const standing: { label: string; map: Beatmap | null; votes: number | null; empty: string } =
+    ballotOpen
+      ? {
+          label: 'Currently Leading',
+          map: leadingMap,
+          votes: leadingMap?.voteCount ?? null,
+          empty: 'Nothing has been approved for voting yet.',
+        }
+      : round?.winnerStatus === 'tiebreak'
+        ? {
+            label: 'Tied at the top',
+            map: null,
+            votes: round.winnerVoteCount,
+            empty: 'Voting ended level. An administrator picks the winner.',
+          }
+        : {
+            label: 'Winner pending approval',
+            map: recordedWinner,
+            votes: round?.winnerVoteCount ?? null,
+            empty: 'Voting is closed. No winning entry is on record for this round.',
+          };
+  // Aliased so the vote callback below closes over a narrowed const rather than
+  // re-reading standing.map, which narrowing does not follow into a closure.
+  const topEntry = standing.map;
 
   if (!round) {
     return (
@@ -590,16 +640,30 @@ export function DashboardPage({
                 <>
                   <p className="text-xs text-emerald-400 font-bold mb-4 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
-                    You have voted
+                    {ballotOpen ? 'You have voted' : 'Your vote is locked in'}
                   </p>
+                  {/* Retracting is a write too, so it goes through the same refusal —
+                      the server stops honouring it the moment the ballot closes. */}
                   <BeatmapCardPlatform
                     beatmap={votedMap}
                     voted
                     showVoteButton
                     onVote={() => onVote(votedMap.id)}
                     voteBusy={voteBusy === votedMap.id}
+                    voteDisabled={refusal(votedMap.id) !== undefined}
+                    voteDisabledReason={refusal(votedMap.id)}
                   />
                 </>
+              ) : !ballotOpen ? (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto mb-4">
+                    <Trophy className="w-7 h-7 text-slate-700" />
+                  </div>
+                  <p className="text-white font-bold mb-1">Voting has closed</p>
+                  <p className="text-sm text-slate-500">
+                    You did not vote in this round. The result is with the administrators now.
+                  </p>
+                </div>
               ) : (
                 <div className="text-center py-8">
                   <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto mb-4">
@@ -627,23 +691,23 @@ export function DashboardPage({
               </div>
               <div className="flex items-center gap-2 mb-4">
                 <Crown className="w-4 h-4 text-amber-400" />
-                <p className="text-[10px] uppercase tracking-widest text-amber-400/80 font-mono font-bold">Currently Leading</p>
-                {leadingMap && (
-                  <span className="ml-auto text-[10px] font-mono text-slate-600">{leadingMap.voteCount ?? 0} votes</span>
+                <p className="text-[10px] uppercase tracking-widest text-amber-400/80 font-mono font-bold">{standing.label}</p>
+                {standing.votes !== null && (
+                  <span className="ml-auto text-[10px] font-mono text-slate-600">{standing.votes} votes</span>
                 )}
               </div>
-              {leadingMap ? (
+              {topEntry ? (
                 <BeatmapCardPlatform
-                  beatmap={leadingMap}
+                  beatmap={topEntry}
                   showVoteButton={Boolean(user)}
-                  voted={myMapId === leadingMap.id}
-                  onVote={() => onVote(leadingMap.id)}
-                  voteBusy={voteBusy === leadingMap.id}
-                  voteDisabled={refusal(leadingMap.id) !== undefined}
-                  voteDisabledReason={refusal(leadingMap.id)}
+                  voted={myMapId === topEntry.id}
+                  onVote={() => onVote(topEntry.id)}
+                  voteBusy={voteBusy === topEntry.id}
+                  voteDisabled={refusal(topEntry.id) !== undefined}
+                  voteDisabledReason={refusal(topEntry.id)}
                 />
               ) : (
-                <p className="text-sm text-slate-500 py-8 text-center">Nothing has been approved for voting yet.</p>
+                <p className="text-sm text-slate-500 py-8 text-center">{standing.empty}</p>
               )}
             </div>
           </div>
@@ -678,15 +742,17 @@ export function DashboardPage({
       {/* ── CHALLENGE PHASE ───────────────────────────────────────────── */}
       {phase === 'challenge' && (
         <div className="space-y-8">
-          {/* Winning beatmap hero. Reaching the challenge phase with nothing
-              approved is degenerate, but a phase can be advanced by hand, so the
-              map-dependent half is guarded. */}
-          {leadingMap ? (
+          {/* The winning beatmap, as recorded when the winner was approved — not the
+              entry leading a live count, which a later retraction could move. The
+              map-dependent half stays guarded: a round archived before winners were
+              recorded, or one whose winning entry was rejected afterwards, has
+              nothing to show here. */}
+          {recordedWinner ? (
           <div className="relative rounded-2xl overflow-hidden border border-purple-500/20 min-h-[220px]">
             <div className="absolute inset-0">
               <img
-                src={leadingMap.coverUrl}
-                alt={leadingMap.title}
+                src={recordedWinner.coverUrl}
+                alt={recordedWinner.title}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover opacity-25"
               />
@@ -700,25 +766,25 @@ export function DashboardPage({
                     Monthly Challenge · {roundLabel(round)}
                   </span>
                 </div>
-                <h2 className="text-3xl font-black text-white mb-1 tracking-tight">{leadingMap.title}</h2>
-                <p className="text-slate-300 mb-1">{leadingMap.artist}</p>
+                <h2 className="text-3xl font-black text-white mb-1 tracking-tight">{recordedWinner.title}</h2>
+                <p className="text-slate-300 mb-1">{recordedWinner.artist}</p>
                 <p className="text-slate-500 text-sm mb-5">
-                  mapped by <span className="text-slate-300 font-medium">{leadingMap.mapper}</span>
+                  mapped by <span className="text-slate-300 font-medium">{recordedWinner.mapper}</span>
                   <span className="mx-2 text-slate-700">·</span>
-                  <span className="font-mono text-amber-400">★ {leadingMap.stars.toFixed(2)}</span>
+                  <span className="font-mono text-amber-400">★ {recordedWinner.stars.toFixed(2)}</span>
                   <span className="mx-2 text-slate-700">·</span>
-                  <span className="font-mono text-slate-400">{leadingMap.bpm} BPM</span>
+                  <span className="font-mono text-slate-400">{recordedWinner.bpm} BPM</span>
                   <span className="mx-2 text-slate-700">·</span>
-                  <span className="font-mono text-slate-400">{leadingMap.length}</span>
+                  <span className="font-mono text-slate-400">{recordedWinner.length}</span>
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/70 border border-slate-700 rounded-full">
                     <span className="text-[10px] text-slate-500">Required mod</span>
-                    <span className="text-sm font-black font-mono text-white">{leadingMap.modRequirement}</span>
+                    <span className="text-sm font-black font-mono text-white">{recordedWinner.modRequirement}</span>
                   </div>
                   <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-400/10 border border-amber-400/25 rounded-full">
                     <span className="text-[10px] text-slate-500">Challenge</span>
-                    <span className="text-sm font-bold text-amber-400">{leadingMap.challengeType}</span>
+                    <span className="text-sm font-bold text-amber-400">{recordedWinner.challengeType}</span>
                   </div>
                 </div>
               </div>
@@ -746,7 +812,7 @@ export function DashboardPage({
                   Monthly Challenge · {roundLabel(round)}
                 </span>
                 <p className="text-sm text-slate-400 mt-2 max-w-md">
-                  No approved beatmap is on record for this round, so there is no challenge map to show.
+                  No winner is on record for this round, so there is no challenge map to show.
                 </p>
               </div>
               <div className="bg-slate-900/80 border border-slate-800 rounded-2xl px-6 py-4 text-right flex-shrink-0">
