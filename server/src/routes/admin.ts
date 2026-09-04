@@ -44,6 +44,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Defaults match the day inputs already shown in AdminDashboard's Round Control. */
 const DEFAULT_DAYS = { submission: 7, voting: 3, challenge: 21 } as const;
 
+/** The challenge prize when a round is opened without one named. */
+const DEFAULT_REWARD = 'One month of osu!supporter';
+
 function fail(res: Response, err: unknown, where: string): void {
   console.error(`[admin] ${where} failed:`, err instanceof Error ? err.message : err);
   res.status(503).json({ error: 'Database unavailable' });
@@ -327,9 +330,12 @@ router.post('/rounds', async (req, res) => {
     return;
   }
 
+  // The bounty IS the challenge prize, and it has a default rather than being blank:
+  // a round with no prize on screen reads as a round with no prize. An administrator
+  // can still set anything here when opening the round.
   const reward =
     body.reward === undefined || body.reward === null || body.reward === ''
-      ? null
+      ? DEFAULT_REWARD
       : String(body.reward).slice(0, 200);
 
   const submissionDays = readDays(body.submissionDays, DEFAULT_DAYS.submission);

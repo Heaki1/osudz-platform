@@ -471,7 +471,7 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
             {[
               { label: 'Month',  val: month,  set: setMonth,  hint: 'current UTC month' },
               { label: 'Year',   val: year,   set: setYear,   hint: 'current year' },
-              { label: 'Reward', val: reward, set: setReward, hint: '1 Month osu!supporter' },
+              { label: 'Reward', val: reward, set: setReward, hint: 'One month of osu!supporter' },
             ].map(({ label, val, set, hint }) => (
               <div key={label}>
                 <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">{label}</p>

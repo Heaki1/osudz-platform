@@ -1031,7 +1031,19 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: render the real challenge leaderboard"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  E4  Bounty as the challenge prize                                      [TODO]
+  E4  Bounty as the challenge prize                                      [DONE]
+      LANDED: POST /api/admin/rounds defaults reward to 'One month of osu!supporter'
+      rather than NULL — a round with no prize on screen reads as a round with no
+      prize — and an administrator can still name anything when opening one. The
+      admin form's placeholder now shows that exact default instead of a differently
+      worded '1 Month osu!supporter'.
+      Displayed in the dashboard round header, where a player deciding whether to
+      enter can see it, as well as on the challenge hero which already read
+      round.reward. The archive entry gets it with F2, which renders that page from
+      the API for the first time.
+      NOT DONE, and out of this item's scope: nothing tracks whether the prize was
+      actually delivered. E4's own DEPS note raised that as a separate question and it
+      stays open for the owner.
       DECIDED  The bounty is the Challenge prize, and the default prize is one
                month of osu!supporter. It is per-round and an admin may change it
                when opening a round.

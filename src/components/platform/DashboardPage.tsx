@@ -60,6 +60,9 @@ const roundMeta: Record<Phase, { label: string; color: string; bar: string; desc
 
 function RoundHeader({ round, countdown }: { round: CurrentRound; countdown: string }) {
   const cfg = roundMeta[round.phase];
+  // Same rule as the nav badge and the vote page: a closed ballot has nothing left to
+  // count down to, and the phase alone cannot tell you the ballot is closed.
+  const frozen = round.phase === 'voting' && !isBallotOpen(round);
 
   return (
     <div className="mb-10">
@@ -71,12 +74,28 @@ function RoundHeader({ round, countdown }: { round: CurrentRound; countdown: str
             </span>
             <span className="text-slate-700">·</span>
             <span className="text-[10px] text-slate-500 font-mono">{roundLabel(round)}</span>
+            {/* The bounty is the challenge prize, so it belongs where the round is
+                introduced rather than only on the challenge hero — a player deciding
+                whether to enter is the one who wants to know it. */}
+            {round.reward && (
+              <>
+                <span className="text-slate-700">·</span>
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-400/90">
+                  <Trophy className="w-3 h-3" />
+                  {round.reward}
+                </span>
+              </>
+            )}
           </div>
           <p className="text-sm text-slate-400 max-w-2xl leading-relaxed">{cfg.desc}</p>
         </div>
         <div className="flex-shrink-0">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 text-right">Ends in</div>
-          <div className={`text-2xl font-black font-mono ${cfg.color}`}>{countdown}</div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 text-right">
+            {frozen ? 'Ballot' : 'Ends in'}
+          </div>
+          <div className={`text-2xl font-black font-mono ${frozen ? 'text-slate-400' : cfg.color}`}>
+            {frozen ? 'closed' : countdown}
+          </div>
         </div>
       </div>
       <div className={`mt-5 h-px w-full ${cfg.bar} opacity-20 rounded-full`} />
