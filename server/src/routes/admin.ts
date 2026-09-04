@@ -9,7 +9,14 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { requireAdmin } from '../middleware/auth.js';
-import { create, findCurrent, isRoundPhase, setPhase, toApiRound } from '../repo/rounds.js';
+import {
+  canTransition,
+  create,
+  findCurrent,
+  isRoundPhase,
+  setPhase,
+  toApiRound,
+} from '../repo/rounds.js';
 import {
   listForRound,
   review,
@@ -71,6 +78,14 @@ router.patch('/round/phase', async (req, res) => {
     const open = await findCurrent();
     if (!open) {
       res.status(409).json({ error: 'No round is open — create one first' });
+      return;
+    }
+
+    // Forward, or terminal. canTransition explains why in repo/rounds.ts.
+    if (!canTransition(open.phase, phase)) {
+      res.status(409).json({
+        error: `A round cannot move from the ${open.phase} phase to the ${phase} phase`,
+      });
       return;
     }
 

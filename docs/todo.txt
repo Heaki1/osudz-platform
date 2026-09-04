@@ -419,23 +419,20 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: advance round phases automatically when due"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  C3  Reject backwards phase transitions                                 [TODO]
-      WHAT   Validate the transition, not just the phase name, in
-             PATCH /api/admin/round/phase.
-      WHY    isRoundPhase in server/src/repo/rounds.ts only checks set
-             membership, so challenge -> submission is accepted. Votes cast in
-             the meantime persist and keep counting, and with a stored winner
-             (D2) a backwards move would silently contradict it.
-      DEPS   none. Do it before D2 so the winner write has one direction to
-             worry about.
-      VERIFY advance to voting, then attempt submission -> 409; forward moves
-             still work; passing an unknown phase still -> 400.
-      STEPS  1 INSPECT   server/src/routes/admin.ts, server/src/repo/rounds.ts
-             2 IMPLEMENT an allowed-transition table beside LIVE_PHASES
-             3 TEST      the three curls above, both typechecks, build
-             4 DIFF      git status --short; git diff
-             5 COMMIT    "fix: refuse backwards round phase transitions"
-             6 VERIFY    git log -1 --stat; git status --short clean
+  C3  Reject backwards phase transitions                                 [DONE]
+      NEXT_PHASES and canTransition in server/src/repo/rounds.ts, checked by
+      PATCH /api/admin/round/phase before it writes. Forward only; ending a round
+      is legal from any live phase so an empty round can be closed without being
+      walked through voting and challenge; same-phase is legal because that call is
+      also how a deadline gets rewritten. All sixteen from/to pairs were verified
+      against the specification.
+      CARRIED FORWARD  voting -> challenge is still legal on this endpoint, so the
+      app can still reach the challenge phase before D2 exists. D2 must close that:
+      the admin UI's voting-phase button calls advance('challenge') directly
+      (AdminDashboard.tsx:140), which would walk straight past the winner-approval
+      endpoint. D2 either removes that transition from this endpoint or repoints
+      the button at approval — otherwise the approval gate is bypassable by the
+      button that is already on screen.
 
   C4  Country allowlist, replacing the hardcoded constant                [TODO]
       WHAT   An allowed_countries table plus admin endpoints, read by isEligible
@@ -591,6 +588,11 @@ fix it as its own item with its own commit.
              winner_vote_count, total_votes, winner_approved_by, winner_approved_at.
              A tied_submission_ids column or a small round_tied_entries table for
              the tiebreak case.
+             MUST ALSO close the bypass C3 left open: voting -> challenge has to
+             stop being reachable through PATCH /api/admin/round/phase, and
+             AdminDashboard.tsx:140's "Close Voting & Start Challenge" button has
+             to point at the approval endpoint instead. Without that, the approval
+             gate is decoration — the existing button walks past it.
              Closing voting computes the top entry and writes 'pending' (or
              'tiebreak'), all inside one transaction. A second admin endpoint
              approves: it sets 'official', stamps who and when, and moves the phase

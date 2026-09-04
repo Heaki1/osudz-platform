@@ -20,6 +20,29 @@ export function isRoundPhase(value: unknown): value is RoundPhase {
   return typeof value === 'string' && ALL_PHASES.includes(value);
 }
 
+/**
+ * Where a round may go from each phase. A round only ever moves forward, and
+ * ending it is legal from anywhere — a round nobody submitted to should not have
+ * to be walked through voting and challenge before it can be closed.
+ *
+ * Staying in the same phase counts as legal because PATCH /round/phase is also
+ * how a deadline gets rewritten.
+ *
+ * isRoundPhase only ever checked that a phase name exists, so 'challenge' back to
+ * 'submission' was accepted. Votes cast in the meantime keep counting, so a round
+ * could be reopened, voted in again, and advanced with a tally nobody expected —
+ * and once a winner is recorded, a backwards move would contradict it outright.
+ */
+const NEXT_PHASES: Record<RoundPhase, readonly RoundPhase[]> = {
+  submission: ['voting', 'ended'],
+  voting: ['challenge', 'ended'],
+  challenge: ['ended'],
+  ended: [],
+};
+
+export const canTransition = (from: RoundPhase, to: RoundPhase): boolean =>
+  from === to || NEXT_PHASES[from].includes(to);
+
 /** The column holding each live phase's scheduled end. */
 const END_COLUMN: Record<LivePhase, string> = {
   submission: 'submission_ends_at',
