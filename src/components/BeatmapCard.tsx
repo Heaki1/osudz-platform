@@ -21,6 +21,12 @@ interface BeatmapCardProps {
   voteDisabled?: boolean;
   /** Why, for the button's title and aria-label. The page states it in prose too. */
   voteDisabledReason?: string;
+  /**
+   * Whether to render a vote button at all. Defaults to true. False turns the card
+   * read-only on both faces — for a closed ballot, where a permanently greyed-out
+   * button is just a dead control on a results page.
+   */
+  showVoteButton?: boolean;
 }
 
 const ratingColors = [
@@ -30,7 +36,7 @@ const ratingColors = [
 export const BeatmapCard: React.FC<BeatmapCardProps> = ({
   beatmap, isPlaying, audioProgress,
   onTogglePlay, onScrubAudio, onVote, onFavorite, onOpenComments,
-  voteBusy, voteDisabled, voteDisabledReason,
+  voteBusy, voteDisabled, voteDisabledReason, showVoteButton = true,
 }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [spinClass, setSpinClass] = useState('');
@@ -351,6 +357,7 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
 
           {/* Actions */}
           <div className="mt-auto pt-3 px-4 pb-4 border-t border-slate-800 flex items-center gap-2 flex-shrink-0">
+            {showVoteButton && (
             <button
               type="button"
               disabled={voteBlocked}
@@ -373,6 +380,7 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                   ? <><CheckCircle2 className="w-3.5 h-3.5" /><span>Voted</span></>
                   : <span>Vote</span>}
             </button>
+            )}
 
             <button
               type="button"
@@ -448,6 +456,7 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
           </div>
 
           <div className="p-3 border-t border-slate-800 flex gap-2 flex-shrink-0">
+            {showVoteButton && (
             <button
               type="button"
               disabled={voteBlocked}
@@ -468,6 +477,7 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                   ? <><CheckCircle2 className="w-3.5 h-3.5" /> Voted</>
                   : 'Vote'}
             </button>
+            )}
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); triggerSpin(onFavorite); }}

@@ -220,7 +220,28 @@ fix it as its own item with its own commit.
         3. a winner state — my_plan.txt:816. Nothing on the page shows the
            official winner once one exists. -> B7
 
-  B7  Winner state and final standings on the vote page                 [TODO]
+  B7  Winner state and final standings on the vote page                  [DONE]
+      LANDED, all three requirements:
+        - the state is stated plainly, in a panel above the grid: the pending winner
+          named with its frozen count, or a tie naming the level entries and saying
+          an administrator picks. The winner named is the one the server recorded,
+          never a leader recomputed from the counts.
+        - no vote action anywhere. BeatmapCard gained showVoteButton, so both faces
+          of the flip card render read-only rather than showing a dead greyed-out
+          button; refusal() puts the closed ballot first, ahead of the guest and
+          self-vote cases, so retracting an existing vote is refused too. The
+          own-entry note and the sidebar's login nudge stop inviting a vote.
+        - no misleading countdown: the header reads "Voting closed" instead of
+          "Ends in ...", which would otherwise either say 'ended' or keep counting
+          toward a deadline an administrator had already closed early.
+      Also: the standings panel is titled "Final Standings" when frozen, and on a tie
+      every level row takes the leader's colour instead of whichever row sorted first;
+      the stats bar says "Winner pending" or "Tied at the top" rather than "Leading";
+      the card badge crowns the recorded winner, or marks each tied entry, and crowns
+      nobody on a tie.
+      NOT REACHABLE HERE: winner_status 'official'. Approving moves the round to the
+      challenge phase in the same transaction, so pageAccess shows PhaseGate and the
+      official winner is read on the dashboard's challenge hero (D3) and the archive.
       WHAT   Once voting has closed, the vote page shows the read-only tally and
              the winner: pending admin approval, awaiting a tiebreak decision, or
              official. This is the "winner" visual state the plan requires, not a

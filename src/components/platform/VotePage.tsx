@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { BeatmapCard } from '../BeatmapCard';
 import { Beatmap, PlatformPage } from '../../types';
-import { CurrentRound, pageAccess, roundLabel, useCountdown } from '../../lib/round';
+import { CurrentRound, isBallotOpen, pageAccess, roundLabel, useCountdown } from '../../lib/round';
 import { AuthUser, phaseConfig } from './NavHeader';
 import { PhaseGate } from './PhaseGate';
-import { Crown, Trophy, ChevronRight, LogIn, X, AlertCircle, Ban } from 'lucide-react';
+import { Crown, Trophy, ChevronRight, LogIn, X, AlertCircle, Ban, Scale } from 'lucide-react';
 
 // ── LOGIN MODAL ───────────────────────────────────────────────────────────────
 
@@ -43,18 +43,31 @@ function LoginModal({ onClose, onLogin }: { onClose: () => void; onLogin?: () =>
 
 // ── VOTE STANDINGS PANEL ─────────────────────────────────────────────────────
 
-function VoteStandings({ maps, votedId }: { maps: Beatmap[]; votedId: string | null }) {
+function VoteStandings({
+  maps,
+  votedId,
+  final,
+  tiedTop,
+}: {
+  maps: Beatmap[];
+  votedId: string | null;
+  /** The ballot is closed, so these numbers cannot move again. */
+  final?: boolean;
+  /** The round ended level, so no single row gets the leader's colour. */
+  tiedTop?: boolean;
+}) {
   const sorted = [...maps].sort((a, b) => (b.voteCount ?? 0) - (a.voteCount ?? 0));
   // Math.max, not `?? 1`: with a list of entries that all have zero votes the leader's
   // count is 0, and dividing by it printed "NaN%" and a `width: NaN%` bar.
   const maxVotes = Math.max(1, sorted[0]?.voteCount ?? 0);
+  const topCount = sorted[0]?.voteCount ?? 0;
 
   return (
     <div className="bg-[#0d1526] border border-slate-800 rounded-2xl overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-800/60 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Trophy className="w-4 h-4 text-amber-400" />
-          <h3 className="text-sm font-bold text-white">Vote Standings</h3>
+          <h3 className="text-sm font-bold text-white">{final ? 'Final Standings' : 'Vote Standings'}</h3>
         </div>
         <span className="text-[10px] text-slate-600 font-mono">
           {maps.reduce((s, m) => s + (m.voteCount ?? 0), 0).toLocaleString()} total
@@ -63,7 +76,7 @@ function VoteStandings({ maps, votedId }: { maps: Beatmap[]; votedId: string | n
       <div className="divide-y divide-slate-800/40">
         {sorted.map((m, i) => {
           const pct = Math.round(((m.voteCount ?? 0) / maxVotes) * 100);
-          const isLeader = i === 0;
+          const isLeader = tiedTop ? (m.voteCount ?? 0) === topCount : i === 0;
           const isMyVote = m.id === votedId;
           return (
             <div key={m.id} className={`px-5 py-3 ${isMyVote ? 'bg-amber-400/4' : ''}`}>
@@ -97,6 +110,68 @@ function VoteStandings({ maps, votedId }: { maps: Beatmap[]; votedId: string | n
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ── CLOSED BALLOT ────────────────────────────────────────────────────────────
+//
+// Voting closes on winner_status while the phase stays 'voting', so without this the
+// page would look like an open ballot whose buttons had all quietly stopped working.
+// The winner named here is the one the server recorded, never a leader recomputed
+// from the counts — that recomputation is the thing the frozen result replaced.
+//
+// 'official' never reaches this page: approving a winner moves the round to the
+// challenge phase in the same transaction, and pageAccess then shows PhaseGate
+// instead. The official winner is on the dashboard's challenge hero.
+
+function BallotClosed({
+  round,
+  winner,
+  tiedTitles,
+}: {
+  round: CurrentRound;
+  winner: Beatmap | null;
+  tiedTitles: string[];
+}) {
+  const counts = `${round.winnerVoteCount ?? 0} of ${round.totalVotes ?? 0} votes cast`;
+
+  if (round.winnerStatus === 'tiebreak') {
+    return (
+      <div className="flex items-start gap-3 bg-blue-500/8 border border-blue-500/25 rounded-2xl px-5 py-4 mb-8">
+        <Scale className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-black text-white mb-1">Voting ended in a tie</p>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            {tiedTitles.length > 0
+              ? `${tiedTitles.length} entries finished level on ${counts}: ${tiedTitles.join(', ')}.`
+              : `The top entries finished level on ${counts}.`}{' '}
+            A tie is not resolved automatically — an administrator picks the winner. No more
+            votes can be cast or retracted, and the standings below are final.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-3 bg-amber-400/8 border border-amber-400/25 rounded-2xl px-5 py-4 mb-8">
+      <Crown className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+      <div>
+        <p className="text-sm font-black text-white mb-1">Voting has closed</p>
+        <p className="text-xs text-slate-400 leading-relaxed">
+          {winner ? (
+            <>
+              <span className="text-amber-400 font-bold">{winner.title}</span> finished on top with{' '}
+              {counts}.
+            </>
+          ) : (
+            `The leading entry finished with ${counts}.`
+          )}{' '}
+          The result is not official until an administrator approves it. No more votes can be
+          cast or retracted, and the standings below are final.
+        </p>
       </div>
     </div>
   );
@@ -176,8 +251,32 @@ export function VotePage({
   const myMapId = mySubmissionId === null ? null : String(mySubmissionId);
   const ownEntryListed = myMapId !== null && sorted.some((m) => m.id === myMapId);
 
+  /**
+   * The ballot is closed but the round has not moved on: the winner is pending or the
+   * round is tied. Everything below reads this rather than the phase, which stays
+   * 'voting' throughout — and it is narrower than !isBallotOpen, which is also true
+   * before voting has started.
+   */
+  const frozen = round?.phase === 'voting' && !isBallotOpen(round);
+  const tied = round?.winnerStatus === 'tiebreak';
+  const recordedWinnerId =
+    round?.winningSubmissionId == null ? null : String(round.winningSubmissionId);
+  const recordedWinner = recordedWinnerId === null
+    ? null
+    : maps.find((m) => m.id === recordedWinnerId) ?? null;
+  /**
+   * Which entries are level at the top of a tied round. The counts cannot move once
+   * the ballot is closed, so the entries matching the frozen winning count are exactly
+   * the tied ones — the admin-only tiebreak list is not needed to say this much.
+   */
+  const tiedEntry = (m: Beatmap): boolean =>
+    tied && round !== null && (m.voteCount ?? 0) === (round.winnerVoteCount ?? -1);
+
   /** Why this entry cannot be voted for, or undefined when it can. */
   const refusal = (id: string): string | undefined => {
+    // First, because it applies to everybody — guests and the retraction of a vote
+    // already cast included. The cards hide their vote button outright when frozen.
+    if (frozen) return 'Voting has closed for this round';
     if (!user) return undefined; // A guest gets the login modal instead of a refusal.
     if (!canVote) return 'Voting is available to Algerian osu! players';
     if (id === myMapId) return 'You cannot vote for your own submission';
@@ -206,13 +305,17 @@ export function VotePage({
             <span className="text-slate-700">·</span>
             <span className="text-[10px] text-slate-500 font-mono">{roundLabel(round)}</span>
             <span className="text-slate-700">·</span>
-            <span className="text-[10px] text-slate-500 font-mono">Ends in {countdown}</span>
+            <span className="text-[10px] text-slate-500 font-mono">
+              {frozen ? 'Voting closed' : `Ends in ${countdown}`}
+            </span>
           </>
         )}
       </div>
       <h1 className="text-2xl font-black text-white mb-2 tracking-tight">Vote for the Monthly Challenge</h1>
       <p className="text-sm text-slate-400 max-w-2xl">
-        Algerian osu! players get one vote. Flip a card to see challenges. The beatmap with the most votes becomes this month's challenge.
+        {frozen
+          ? 'The ballot is closed and these totals are final. Flip a card to see the challenge it was submitted with.'
+          : "Algerian osu! players get one vote. Flip a card to see challenges. The beatmap with the most votes becomes this month's challenge."}
       </p>
     </div>
   );
@@ -260,6 +363,14 @@ export function VotePage({
 
       {voteError && <VoteError text={voteError} onDismiss={onDismissVoteError} />}
 
+      {frozen && round && (
+        <BallotClosed
+          round={round}
+          winner={recordedWinner}
+          tiedTitles={sorted.filter(tiedEntry).map((m) => m.title)}
+        />
+      )}
+
       {/* Stats + vote status */}
       <div className="flex items-center gap-4 mb-8 flex-wrap">
         <div className="flex items-center gap-4 bg-[#0d1526] border border-slate-800 rounded-xl px-5 py-3 flex-wrap gap-y-2">
@@ -274,10 +385,20 @@ export function VotePage({
           </div>
           <div className="w-px h-8 bg-slate-800" />
           <div className="flex items-center gap-2">
-            <Crown className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            {tied
+              ? <Scale className="w-4 h-4 text-blue-400 flex-shrink-0" />
+              : <Crown className="w-4 h-4 text-amber-400 flex-shrink-0" />}
             <div>
-              <div className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">Leading</div>
-              <div className="text-sm font-black text-amber-400 truncate max-w-40">{leader?.title}</div>
+              <div className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">
+                {tied ? 'Tied at the top' : frozen ? 'Winner pending' : 'Leading'}
+              </div>
+              <div className={`text-sm font-black truncate max-w-40 ${tied ? 'text-blue-400' : 'text-amber-400'}`}>
+                {tied
+                  ? `${sorted.filter(tiedEntry).length} entries`
+                  : frozen
+                    ? recordedWinner?.title ?? 'not recorded'
+                    : leader?.title}
+              </div>
             </div>
           </div>
         </div>
@@ -289,6 +410,11 @@ export function VotePage({
               <p className="text-xs font-black text-emerald-400">Vote cast</p>
               <p className="text-[10px] text-emerald-400/60 truncate max-w-[160px]">{votedMap.title}</p>
             </div>
+          </div>
+        ) : frozen ? (
+          <div className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5">
+            <Ban className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+            <p className="text-xs font-bold text-slate-400">Voting is closed for this round.</p>
           </div>
         ) : user && !canVote ? (
           <div className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5">
@@ -315,7 +441,7 @@ export function VotePage({
             <span className="text-[10px] text-slate-600 font-mono">{maps.length} beatmaps</span>
           </div>
 
-          {ownEntryListed && (
+          {ownEntryListed && !frozen && (
             <p className="text-[11px] text-slate-600 -mt-2 mb-4">
               Your own entry is in this list and cannot be voted for.
             </p>
@@ -323,13 +449,31 @@ export function VotePage({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
             {visibleMaps.map((beatmap) => {
-              const isLeader = beatmap.id === leader?.id;
+              const votes = (beatmap.voteCount ?? 0).toLocaleString();
+              // The badge says what the round actually is: the live leader while the
+              // ballot is open, and once it is closed either the recorded winner or the
+              // entries level at the top. A tie crowns nobody.
+              const badge: { tie: boolean; text: string } | null = !frozen
+                ? beatmap.id === leader?.id
+                  ? { tie: false, text: `Leading · ${votes} votes` }
+                  : null
+                : tied
+                  ? tiedEntry(beatmap)
+                    ? { tie: true, text: `Tied · ${votes} votes` }
+                    : null
+                  : beatmap.id === recordedWinnerId
+                    ? { tie: false, text: 'Winner · pending approval' }
+                    : null;
               return (
                 <div key={beatmap.id} className="relative">
-                  {isLeader && (
-                    <div className="absolute -top-3 left-4 z-10 flex items-center gap-1.5 bg-amber-400 text-slate-950 text-[10px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider shadow-lg shadow-amber-400/25">
-                      <Crown className="w-3 h-3" />
-                      Leading · {(beatmap.voteCount ?? 0).toLocaleString()} votes
+                  {badge && (
+                    <div
+                      className={`absolute -top-3 left-4 z-10 flex items-center gap-1.5 text-slate-950 text-[10px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider shadow-lg ${
+                        badge.tie ? 'bg-blue-400 shadow-blue-400/25' : 'bg-amber-400 shadow-amber-400/25'
+                      }`}
+                    >
+                      {badge.tie ? <Scale className="w-3 h-3" /> : <Crown className="w-3 h-3" />}
+                      {badge.text}
                     </div>
                   )}
                   <BeatmapCard
@@ -344,6 +488,7 @@ export function VotePage({
                     voteBusy={voteBusy === beatmap.id}
                     voteDisabled={refusal(beatmap.id) !== undefined}
                     voteDisabledReason={refusal(beatmap.id)}
+                    showVoteButton={!frozen}
                   />
                 </div>
               );
@@ -366,8 +511,8 @@ export function VotePage({
 
         {/* Standings sidebar */}
         <aside className="hidden lg:block w-72 flex-shrink-0 sticky top-24">
-          <VoteStandings maps={maps} votedId={votedMap?.id ?? null} />
-          {!user && (
+          <VoteStandings maps={maps} votedId={votedMap?.id ?? null} final={frozen} tiedTop={tied} />
+          {!user && !frozen && (
             <div className="mt-4 bg-[#0d1526] border border-slate-800 rounded-2xl px-4 py-4 text-center">
               <p className="text-xs text-slate-500 leading-relaxed">
                 Log in with your osu! account to cast your vote.
