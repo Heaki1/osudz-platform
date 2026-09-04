@@ -21,8 +21,8 @@ STATUS  DONE     landed at or before the baseline
                   confirm its claims still hold at current HEAD
   2 IMPLEMENT     only that item's change; no drive-by edits, no bundling
   3 TEST          the item's own verification, plus always:
-                    npx tsc --noEmit                 (repo root)
-                    cd server && npx tsc --noEmit
+                    npm run typecheck                (repo root)
+                    cd server && npm run typecheck
                     npm run build                    (repo root)
   4 INSPECT DIFF  git status --short
                   git diff — read every hunk; nothing unrelated may be in it
@@ -928,18 +928,10 @@ fix it as its own item with its own commit.
 
 # H. FINAL TESTING AND CLEANUP
 
-  H1  Typecheck scripts in both package.json                             [TODO]
-      WHAT   "typecheck": "tsc --noEmit" in the root and in server/.
-      WHY    Neither has one, so the only way to typecheck is to remember the
-             raw command in two directories. Cheapest item on this list.
-      DEPS   none. Do it first — every other item's TEST step uses it.
-      VERIFY npm run typecheck passes in both directories.
-      STEPS  1 INSPECT   package.json, server/package.json
-             2 IMPLEMENT add the script to both
-             3 TEST      run it in both, then npm run build
-             4 DIFF      git status --short; git diff
-             5 COMMIT    "chore: add typecheck scripts"
-             6 VERIFY    git log -1 --stat; git status --short clean
+  H1  Typecheck scripts in both package.json                             [DONE]
+      "typecheck": "tsc --noEmit" added to package.json and server/package.json,
+      and THE LOOP's step 3 above now names them instead of the raw command. Both
+      pass; the build is unaffected.
 
   H2  A test runner, and the first tests worth having                     [TODO]
       WHAT   vitest in both packages, then tests for the pure logic that is
