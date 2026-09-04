@@ -121,6 +121,33 @@ export interface ApiBeatmapPreview {
   hp: number | null;
 }
 
+/**
+ * One player's play on a round's winning beatmap.
+ *
+ * `qualified` is what the play can be judged on by itself — the required mods, and a
+ * full combo where that was the requirement. The other three challenge requirements
+ * are relative, so they are expressed by the order the server returns rather than by
+ * this flag; see server/src/repo/challengeScores.ts.
+ */
+export interface ApiChallengeScore {
+  /** 1-based position in the order the server returned. 0 for a single score read. */
+  rank: number;
+  userId: number;
+  osuId: number;
+  username: string;
+  avatarUrl: string;
+  score: number;
+  /** A percentage, 0-100. */
+  accuracy: number;
+  misses: number;
+  /** Joined acronyms ('HDHR'), or 'NM'. */
+  mods: string;
+  qualified: boolean;
+  /** Null when an administrator entered this by hand rather than importing it. */
+  osuScoreId: number | null;
+  submittedAt: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -212,6 +239,23 @@ export const api = {
     retract: () => send<{ ok: boolean }>("DELETE", "/votes"),
   },
 
+  // ── Challenge ──────────────────────────────────────────────────────────────
+  challenge: {
+    /** A round's leaderboard, best first. Defaults to the open round; [] when none. */
+    scores: (roundId?: number) =>
+      get<ApiChallengeScore[]>(
+        roundId === undefined ? "/challenge/scores" : `/challenge/scores?roundId=${roundId}`
+      ),
+    /** The caller's own recorded score for the open round, or null. */
+    my: () => get<ApiChallengeScore | null>("/challenge/my"),
+    /**
+     * Imports the caller's osu! score for the winning beatmap. The body is empty:
+     * the map comes from the recorded winner and the player from the session.
+     */
+    importMine: () =>
+      send<{ ok: boolean; score: ApiChallengeScore }>("POST", "/challenge/scores"),
+  },
+
   // ── Admin ──────────────────────────────────────────────────────────────────
   admin: {
     /** `endsAt` overrides the scheduled end of the phase being entered. */
@@ -247,6 +291,17 @@ export const api = {
       ),
     /** Submission ids a tied round may be resolved to. */
     tiebreakEntries: () => get<number[]>("/admin/round/tiebreak"),
+    /**
+     * Records or overrides a challenge score by hand, for a play the osu! API will
+     * not give up or a correction. The player is named by osu! id.
+     */
+    recordScore: (body: {
+      osuId: number;
+      score: number;
+      accuracy: number;
+      misses: number;
+      mods?: string;
+    }) => send<{ ok: boolean; score: ApiChallengeScore }>("POST", "/admin/challenge/scores", body),
   },
 
   // ── Health ─────────────────────────────────────────────────────────────────

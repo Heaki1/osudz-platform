@@ -901,7 +901,25 @@ fix it as its own item with its own commit.
 
 # E. CHALLENGE
 
-  E1  Challenge score endpoints, with qualification computed             [TODO]
+  E1  Challenge score endpoints, with qualification computed             [DONE]
+      LANDED: repo/challengeScores.ts and routes/challenge.ts, mounted at
+      /api/challenge. GET /scores?roundId= is a public read defaulting to the open
+      round, GET /my is the caller's own row, POST /scores imports it (E2).
+      THE FINDING THAT SHAPED IT: only ONE of the four challenge requirements can be
+      judged from a single play. 'Full Combo' is absolute. 'Top #1 Score', 'Best
+      Accuracy' and 'Lowest Miss Count' are RELATIVE — they are decided by comparing
+      every play in the round, so no insert can know the answer, and 002's comment that
+      qualified is "computed on insert" is only true in one reading. So qualified means
+      "this play counts at all": the required mods are present, plus no misses where a
+      full combo was required. The three relative requirements live in the leaderboard
+      ORDER instead — accuracy DESC, misses ASC, or the default score DESC, which is
+      the one challenge_scores_leaderboard already indexes. Qualifying plays always
+      sort above non-qualifying ones.
+      Two honest caveats, both in the code: a true full combo means no misses AND no
+      dropped slider ends, and nothing stores a beatmap's max combo, so misses === 0 is
+      the checkable approximation; and the 'CL' Classic marker osu! attaches to
+      old-scoring plays is ignored when judging, or every classic play would fail a
+      'NM' requirement for a reason no player would recognise.
       WHAT   Routes over the existing challenge_scores table: submit or record a
              score, list a round's leaderboard. Compute the qualified column on
              insert against the winning entry's mod and challenge requirement.
@@ -927,7 +945,27 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: implement challenge score submission"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  E2  Fetch scores from osu!, with a manual admin path as well            [TODO]
+  E2  Fetch scores from osu!, with a manual admin path as well           [DONE]
+      LANDED, both paths, and neither needs a user token — see the probe recorded
+      below. POST /api/challenge/scores takes an EMPTY body on purpose: the beatmap
+      comes from the round's recorded winner and the player from the session, so there
+      is nothing for a caller to assert about whose score counts for what.
+      services/osu.ts gained fetchUserScore, which reads
+      GET /beatmaps/{id}/scores/users/{osuId} with the application token and normalises
+      what comes back: total_score or score, accuracy from a 0..1 fraction to the
+      percentage numeric(5,2) holds, statistics.count_miss or .miss, and mods in either
+      the plain-acronym or the { acronym, settings } shape, because a challenge map can
+      have plays from both eras.
+      POST /api/admin/challenge/scores is the manual path, naming the player by osu!
+      id — what an administrator can read off a profile. It writes osu_score_id NULL
+      deliberately: that column exists to mark API-imported plays, and its UNIQUE
+      constraint is what stops a hand-entered score colliding with an imported one.
+      A player must have signed in at least once, since user_id is a real foreign key.
+      ASSUMPTION, flagged rather than decided: POST /challenge/scores uses
+      requireEligible, the same gate as submitting and voting, so the challenge is for
+      the same community as the rest of the platform. Nothing in my_plan.txt says
+      whether non-Algerian players may compete. If they should, that one middleware
+      becomes requireAuth and nothing else changes.
       DECIDED  BOTH. A player's score on the winning map is fetched automatically
                from the osu! API and recorded in challenge_scores, AND
                administrators must have a manual import or entry option alongside

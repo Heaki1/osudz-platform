@@ -225,3 +225,92 @@ export function parseDifficultyId(input: string): number | null {
   }
   return null;
 }
+
+// ── Challenge scores (client-credentials) ────────────────────────────────────
+//
+// A player's score on one difficulty is public data, and the application token reads
+// it with no user context at all. That was verified against the live API before this
+// was written — see docs/todo.txt E2 — and it is the reason nothing in this project
+// stores a per-user osu! token.
+
+/** The fields challenge_scores records, flattened out of one osu! score. */
+export interface OsuScore {
+  osuScoreId: number;
+  score: number;
+  /** A percentage, 0-100. The API reports a 0..1 fraction. */
+  accuracy: number;
+  misses: number;
+  /** Acronyms joined ('HDHR'), or 'NM' when the play had none. */
+  mods: string;
+  rank: string;
+  passed: boolean;
+  endedAt: string | null;
+}
+
+/** Raised when the player has no score on that difficulty, so routes can answer 404. */
+export class ScoreNotFound extends Error {}
+
+/**
+ * Normalises the mods array. osu! returns plain acronyms on older scores and
+ * { acronym, settings } objects on newer ones, and both shapes reach this project
+ * because a challenge map can have plays from either era.
+ */
+function readMods(raw: unknown): string {
+  if (!Array.isArray(raw)) return 'NM';
+  const acronyms = raw
+    .map((mod) => {
+      if (typeof mod === 'string') return mod;
+      if (mod && typeof mod === 'object' && typeof (mod as { acronym?: unknown }).acronym === 'string') {
+        return (mod as { acronym: string }).acronym;
+      }
+      return '';
+    })
+    .filter((acronym) => acronym !== '');
+  return acronyms.length === 0 ? 'NM' : acronyms.join('');
+}
+
+/**
+ * One player's score on one difficulty. Throws ScoreNotFound when they have never
+ * set one, which osu! answers with a 404 rather than an empty body.
+ */
+export async function fetchUserScore(difficultyId: number, osuUserId: number): Promise<OsuScore> {
+  const res = await fetch(`${API_BASE}/beatmaps/${difficultyId}/scores/users/${osuUserId}`, {
+    headers: { Authorization: `Bearer ${await getAppToken()}`, Accept: 'application/json' },
+  });
+
+  if (res.status === 404) throw new ScoreNotFound('No score on this beatmap');
+  if (!res.ok) {
+    throw new Error(`osu! GET /beatmaps/${difficultyId}/scores/users/${osuUserId} failed: ${res.status}`);
+  }
+
+  // The endpoint wraps the score alongside its leaderboard position.
+  const body = (await res.json()) as { score?: Record<string, unknown> };
+  const s = (body.score ?? body) as Record<string, unknown>;
+
+  const total = asNumber(s.total_score) ?? asNumber(s.score);
+  const accuracy = asNumber(s.accuracy);
+  if (total === null || accuracy === null) {
+    throw new Error(`osu! returned a score with no usable total or accuracy`);
+  }
+
+  const stats = (s.statistics ?? {}) as Record<string, unknown>;
+  const misses = asNumber(stats.count_miss) ?? asNumber(stats.miss) ?? 0;
+  const id = asNumber(s.id);
+
+  return {
+    osuScoreId: id ?? 0,
+    score: Math.round(total),
+    // numeric(5,2) holds a percentage; the API's 0..1 fraction would store as 0.99.
+    accuracy: Math.round(accuracy * 10_000) / 100,
+    misses: Math.round(misses),
+    mods: readMods(s.mods),
+    rank: typeof s.rank === 'string' ? s.rank : '',
+    passed: s.passed !== false,
+    endedAt:
+      typeof s.ended_at === 'string'
+        ? s.ended_at
+        : typeof s.created_at === 'string'
+          ? s.created_at
+          : null,
+  };
+}

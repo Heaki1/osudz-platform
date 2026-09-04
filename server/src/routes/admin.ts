@@ -21,12 +21,19 @@ import {
   toApiRound,
 } from '../repo/rounds.js';
 import {
+  findById as findSubmission,
   listForRound,
   review,
   toApiSubmission,
   REVIEW_DECISIONS,
   type ReviewDecision,
 } from '../repo/submissions.js';
+import { findByOsuId } from '../repo/users.js';
+import {
+  qualifies,
+  toApiChallengeScore,
+  upsert as upsertScore,
+} from '../repo/challengeScores.js';
 
 const router = Router();
 
@@ -195,6 +202,97 @@ router.get('/round/tiebreak', async (_req, res) => {
     res.json(await listTiebreakEntries(open.id));
   } catch (err) {
     fail(res, err, 'tiebreak list');
+  }
+});
+
+// POST /api/admin/challenge/scores — record or override a challenge score by hand.
+//
+// The manual half of the decision that scores are BOTH fetched automatically and
+// enterable by an administrator: for a play the osu! API will not give up, or a
+// correction. osu_score_id is deliberately left null on this path — the column exists
+// to mark API-imported plays, and its UNIQUE constraint is what stops a hand-entered
+// score from ever colliding with an imported one.
+//
+// The player is named by osu! id, which is what an administrator can read off a
+// profile. They must have signed in at least once, because challenge_scores.user_id is
+// a foreign key to a real account.
+router.post('/challenge/scores', async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+
+  const osuId = Number(body.osuId);
+  if (!Number.isInteger(osuId) || osuId <= 0) {
+    res.status(400).json({ error: 'osuId must be the player osu! id' });
+    return;
+  }
+
+  const score = Number(body.score);
+  const accuracy = Number(body.accuracy);
+  const misses = Number(body.misses);
+  if (!Number.isInteger(score) || score < 0) {
+    res.status(400).json({ error: 'score must be a non-negative integer' });
+    return;
+  }
+  if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100) {
+    res.status(400).json({ error: 'accuracy must be a percentage between 0 and 100' });
+    return;
+  }
+  if (!Number.isInteger(misses) || misses < 0) {
+    res.status(400).json({ error: 'misses must be a non-negative integer' });
+    return;
+  }
+
+  const mods =
+    body.mods === undefined || body.mods === null || body.mods === '' ? 'NM' : body.mods;
+  if (typeof mods !== 'string' || mods.length > 16) {
+    res.status(400).json({ error: 'mods must be joined acronyms, at most 16 characters' });
+    return;
+  }
+
+  try {
+    const open = await findCurrent();
+    if (!open) {
+      res.status(409).json({ error: 'No round is open' });
+      return;
+    }
+    if (open.winning_submission_id === null) {
+      res.status(409).json({ error: 'This round has no recorded winner to judge a score against' });
+      return;
+    }
+
+    const winner = await findSubmission(open.winning_submission_id);
+    if (!winner) {
+      res.status(409).json({ error: 'The recorded winning entry no longer exists' });
+      return;
+    }
+
+    const player = await findByOsuId(osuId);
+    if (!player) {
+      res.status(404).json({
+        error: 'No account with that osu! id has signed in to osu!DZ, so a score cannot be attributed to it',
+      });
+      return;
+    }
+
+    const row = await upsertScore({
+      roundId: open.id,
+      userId: player.id,
+      score,
+      accuracy: Math.round(accuracy * 100) / 100,
+      misses,
+      mods,
+      qualified: qualifies(
+        { mods, misses },
+        {
+          modRequirement: winner.mod_requirement,
+          challengeRequirement: winner.challenge_requirement,
+        }
+      ),
+      osuScoreId: null,
+    });
+
+    res.json({ ok: true, score: toApiChallengeScore(row, 0) });
+  } catch (err) {
+    fail(res, err, 'record score');
   }
 });
 
