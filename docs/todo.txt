@@ -586,7 +586,25 @@ fix it as its own item with its own commit.
   winner_status === 'none', or votes would keep landing while a winner sat pending
   and the frozen counts would stop matching the table.
 
-  D2  Record the winner, pending approval, then make it official        [TODO]
+  D2  Record the winner, pending approval, then make it official   [IN PROGRESS]
+      LANDED, server side: migration 004_round_winner.sql adds winner_status with
+      its CHECK, winning_submission_id (ON DELETE SET NULL — losing a submission
+      must not delete the round), the two frozen counts, and who approved when; plus
+      round_tiebreak_entries, a row per tied entry so each is a real foreign key.
+      repo/rounds.ts gained closeVoting and approveWinner, the first transactions in
+      this codebase. Both lock the round FOR UPDATE: counting, freezing and setting
+      the status have to land together, or a vote slips in behind the count. With no
+      votes at all every entry is level on zero, so that is a tie like any other and
+      goes to an administrator rather than to whatever row sorted first.
+      voting -> challenge is gone from NEXT_PHASES, so PATCH /round/phase cannot
+      approve a winner by accident; approveWinner is the only path.
+      Both vote endpoints now refuse once winner_status leaves 'none'.
+      Admin endpoints: POST /round/close-voting, POST /round/winner, GET
+      /round/tiebreak. Client seam and ApiRound carry the winner fields.
+      STILL TO DO: the admin UI half — AdminDashboard's "Close Voting & Start
+      Challenge" button must become close-then-approve, with a tiebreak chooser.
+      MIGRATION NOT YET APPLIED: the API will error on every round read until
+      `cd server && pnpm run migrate` is run.
       WHAT   Migration adding to rounds: winner_status (checked against the four
              values), winning_submission_id (nullable FK to submissions),
              winner_vote_count, total_votes, winner_approved_by, winner_approved_at.

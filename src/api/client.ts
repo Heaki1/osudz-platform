@@ -38,6 +38,18 @@ export interface ApiRound {
   submissionEndsAt: string | null;
   votingEndsAt: string | null;
   challengeEndsAt: string | null;
+  /**
+   * How far this round's winner has got. The phase stays 'voting' while the winner
+   * is 'pending' or 'tiebreak', so this is what says whether the ballot is open.
+   */
+  winnerStatus: "none" | "pending" | "tiebreak" | "official";
+  /** Null until the winner is determined, and while a tie is unresolved. */
+  winningSubmissionId: number | null;
+  /** Frozen when voting closed. On a tie, the count each tied entry reached. */
+  winnerVoteCount: number | null;
+  /** Votes cast in the round, frozen alongside winnerVoteCount. */
+  totalVotes: number | null;
+  winnerApprovedAt: string | null;
 }
 
 export type MapStatus = "ranked" | "loved" | "approved";
@@ -209,6 +221,18 @@ export const api = {
       get<ApiSubmission[]>(roundId === undefined ? "/admin/submissions" : `/admin/submissions?roundId=${roundId}`),
     reviewSubmission: (id: number, status: "approved" | "rejected") =>
       send<{ ok: boolean; submission: ApiSubmission }>("PATCH", `/admin/submissions/${id}`, { status }),
+    /** Ends the ballot and records a pending or tied winner. Does not advance the phase. */
+    closeVoting: () =>
+      send<{ ok: boolean; round: ApiRound; tied: number[] }>("POST", "/admin/round/close-voting"),
+    /** Approves the winner and starts the challenge. submissionId is required on a tie. */
+    approveWinner: (submissionId?: number) =>
+      send<{ ok: boolean; round: ApiRound }>(
+        "POST",
+        "/admin/round/winner",
+        submissionId === undefined ? {} : { submissionId }
+      ),
+    /** Submission ids a tied round may be resolved to. */
+    tiebreakEntries: () => get<number[]>("/admin/round/tiebreak"),
   },
 
   // ── Health ─────────────────────────────────────────────────────────────────

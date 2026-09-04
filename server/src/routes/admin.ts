@@ -10,10 +10,13 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import {
+  approveWinner,
   canTransition,
+  closeVoting,
   create,
   findCurrent,
   isRoundPhase,
+  listTiebreakEntries,
   setPhase,
   toApiRound,
 } from '../repo/rounds.js';
@@ -97,6 +100,101 @@ router.patch('/round/phase', async (req, res) => {
     res.json({ ok: true, round: toApiRound(updated) });
   } catch (err) {
     fail(res, err, 'phase update');
+  }
+});
+
+// POST /api/admin/round/close-voting — end the ballot and record the outcome.
+//
+// The only way voting ends by hand. It does not advance the phase: the round stays
+// in 'voting' with a winner pending, or tied, until POST /round/winner approves one.
+// Everything is computed and frozen in one transaction — see repo/rounds.ts.
+router.post('/round/close-voting', async (req, res) => {
+  try {
+    const open = await findCurrent();
+    if (!open) {
+      res.status(409).json({ error: 'No round is open' });
+      return;
+    }
+
+    const outcome = await closeVoting(open.id);
+    if (!outcome.ok) {
+      const message =
+        outcome.reason === 'not-voting'
+          ? `This round is in the ${open.phase} phase, so there is no ballot to close`
+          : outcome.reason === 'already-closed'
+            ? 'Voting is already closed for this round'
+            : 'Nothing was approved for voting, so there is no winner to record';
+      res.status(409).json({ error: message });
+      return;
+    }
+
+    res.json({ ok: true, round: toApiRound(outcome.round), tied: outcome.tied });
+  } catch (err) {
+    fail(res, err, 'close voting');
+  }
+});
+
+// POST /api/admin/round/winner — approve the winner and start the challenge.
+//
+// Body: { submissionId? }, required only when the round closed tied. This is the
+// only path from voting to challenge; NEXT_PHASES does not offer that transition, so
+// PATCH /round/phase cannot be used to skip this step.
+router.post('/round/winner', async (req, res) => {
+  const { submissionId } = (req.body ?? {}) as { submissionId?: unknown };
+  let chosen: number | undefined;
+  if (submissionId !== undefined) {
+    const id = typeof submissionId === 'number' ? submissionId : Number(submissionId);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'submissionId must be a submission id' });
+      return;
+    }
+    chosen = id;
+  }
+
+  try {
+    const open = await findCurrent();
+    if (!open) {
+      res.status(409).json({ error: 'No round is open' });
+      return;
+    }
+
+    const admin = req.user;
+    if (!admin) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const outcome = await approveWinner(open.id, admin.id, chosen);
+    if (!outcome.ok) {
+      const message =
+        outcome.reason === 'not-closed'
+          ? 'Close voting first — there is no winner to approve yet'
+          : outcome.reason === 'already-official'
+            ? 'This round already has an approved winner'
+            : outcome.reason === 'needs-selection'
+              ? 'This round is tied, so name which submission won'
+              : 'That submission is not one of the entries you may choose from';
+      res.status(409).json({ error: message });
+      return;
+    }
+
+    res.json({ ok: true, round: toApiRound(outcome.round) });
+  } catch (err) {
+    fail(res, err, 'approve winner');
+  }
+});
+
+// GET /api/admin/round/tiebreak — the entries a tied round may be resolved to.
+router.get('/round/tiebreak', async (_req, res) => {
+  try {
+    const open = await findCurrent();
+    if (!open) {
+      res.json([]);
+      return;
+    }
+    res.json(await listTiebreakEntries(open.id));
+  } catch (err) {
+    fail(res, err, 'tiebreak list');
   }
 });
 

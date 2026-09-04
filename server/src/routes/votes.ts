@@ -30,6 +30,15 @@ function fail(res: Response, err: unknown, where: string): void {
 const closedInPhase = (phase: string): string =>
   `Voting is closed — this round is in the ${phase} phase`;
 
+/**
+ * The ballot closes when a winner is computed, not when the phase moves on. The
+ * phase stays 'voting' while the winner is pending or tied, so both casting and
+ * retracting stop here: winner_vote_count and total_votes are frozen at that moment
+ * and a late withdrawal would leave the recorded result disagreeing with the votes
+ * table.
+ */
+const BALLOT_CLOSED = 'Voting has closed for this round while the winner is confirmed';
+
 // GET /api/votes/my — the caller's vote in the open round, or null.
 //
 // Answers 200 with a null body rather than 404 when there is no vote. The client's
@@ -80,6 +89,10 @@ router.post('/', requireEligible, async (req, res) => {
     }
     if (round.phase !== 'voting') {
       res.status(409).json({ error: closedInPhase(round.phase) });
+      return;
+    }
+    if (round.winner_status !== 'none') {
+      res.status(409).json({ error: BALLOT_CLOSED });
       return;
     }
 
@@ -138,6 +151,10 @@ router.delete('/', requireAuth, async (req, res) => {
     }
     if (round.phase !== 'voting') {
       res.status(409).json({ error: closedInPhase(round.phase) });
+      return;
+    }
+    if (round.winner_status !== 'none') {
+      res.status(409).json({ error: BALLOT_CLOSED });
       return;
     }
 
