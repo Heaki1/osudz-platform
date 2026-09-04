@@ -1087,7 +1087,24 @@ fix it as its own item with its own commit.
 
 # F. ARCHIVE
 
-  F1  Archive API over completed rounds                                  [TODO]
+  F1  Archive API over completed rounds                                  [DONE]
+      LANDED: GET /api/rounds and GET /api/rounds/:id now return the same full shape —
+      the recorded winner as a whole submission, that round's challenge leaderboard
+      already ordered for its own challenge requirement, and a participant count.
+      GET /rounds/current stays deliberately lean: every page loads it on every render,
+      and the two callers that want the detail ask by id.
+      PARTICIPANTS is defined as the union of three things — entering a beatmap, casting
+      a vote, posting a challenge score — counted over distinct (round_id, user_id), so
+      somebody who did all three is one person rather than three. That is one grouped
+      UNION query for every round at once.
+      One query per round for the winner and one for its leaderboard, on purpose: the
+      leaderboard's ORDER depends on that round's own challenge requirement, and routing
+      every read through listForRound keeps a single implementation of that ordering
+      instead of a second one in JavaScript that could drift. The archive holds one row
+      per month the community has run.
+      A winner is optional throughout, because a round can be ended by hand from any
+      phase — the endpoint omits that half rather than fabricating it, as this item's
+      DEPS asked.
       WHAT   Extend GET /api/rounds and /api/rounds/:id to serve ended rounds
              with the winner, its vote count and the round total, the challenge
              leaderboard, and the participant count.
@@ -1107,7 +1124,22 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: serve completed rounds for the archive"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  F2  ArchivePage reads the API; delete archiveData                      [TODO]
+  F2  ArchivePage reads the API; delete archiveData                      [DONE]
+      LANDED: the page fetches GET /api/rounds itself rather than through App's refresh,
+      because that read carries every round's winner and leaderboard and only this page
+      wants them. Loading, failed, and empty-archive states all exist now.
+      The hardcoded "Round 4 · August 2026 is currently in progress" line is replaced by
+      the open round read from the API, naming its actual phase.
+      Two states the fabricated data never had to consider, both handled: a round ended
+      with NO recorded winner — possible because an administrator can end a round from
+      any phase — renders as a plain card saying so instead of crashing on a missing
+      beatmap; and a round where nobody's play met the requirement has no challenge
+      winner rather than promoting the top row to one. The vote share is omitted rather
+      than printing NaN% when no ballot was ever counted.
+      DELETED: archiveData (117 lines) and challengeScores from sampleData.ts, and with
+      them the ArchiveEntry and ChallengeScore interfaces in src/types.ts, which existed
+      only to type the fabrications. The API DTOs own those shapes now. grep src/ for
+      archiveData returns nothing.
       WHAT   Give ArchivePage props and real data, add empty and loading states,
              remove the hardcoded "Round 4 · August 2026 is currently in
              progress" line, and delete archiveData from sampleData.ts.

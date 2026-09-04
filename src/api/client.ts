@@ -53,9 +53,8 @@ export interface ApiRound {
 }
 
 /**
- * One round with the entry recorded as its winner — GET /rounds/:id only. The list
- * and current endpoints stay lean; a caller showing one round (the archive, mainly)
- * is the one that needs the map rather than an id.
+ * A round with everything the archive shows. Served by GET /rounds and GET /rounds/:id;
+ * GET /rounds/current stays lean, because every page loads that one on every render.
  */
 export interface ApiRoundDetail extends ApiRound {
   /**
@@ -63,6 +62,13 @@ export interface ApiRoundDetail extends ApiRound {
    * nothing is recorded yet, and while a tie is unresolved.
    */
   winner: ApiSubmission | null;
+  /**
+   * That round's challenge scores, in the order the server ordered them for this
+   * round's own challenge requirement. Never re-sort them on the client.
+   */
+  leaderboard: ApiChallengeScore[];
+  /** Distinct people who entered, voted, or posted a challenge score in this round. */
+  participants: number;
 }
 
 export type MapStatus = "ranked" | "loved" | "approved";
@@ -209,8 +215,9 @@ export const api = {
   rounds: {
     /** Resolves to null both when no round is open and when the API is down. */
     current: () => get<ApiRound>("/rounds/current"),
-    list: () => get<ApiRound[]>("/rounds"),
-    /** One round plus its recorded winner. */
+    /** Every round, newest first, with winner, leaderboard and participants. */
+    list: () => get<ApiRoundDetail[]>("/rounds"),
+    /** One round, in the same shape as the list. */
     get: (id: number) => get<ApiRoundDetail>(`/rounds/${id}`),
   },
 

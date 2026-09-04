@@ -3,8 +3,16 @@
 
 import { Router } from 'express';
 import type { Response } from 'express';
-import { findById, findCurrent, listAll, toApiRound } from '../repo/rounds.js';
+import {
+  findById,
+  findCurrent,
+  listAll,
+  participantCounts,
+  toApiRound,
+  type RoundRow,
+} from '../repo/rounds.js';
 import { findById as findSubmission, toApiSubmission } from '../repo/submissions.js';
+import { listForRound, toApiChallengeScore } from '../repo/challengeScores.js';
 
 const router = Router();
 
@@ -13,8 +21,41 @@ function dbDown(res: Response, err: unknown, where: string): void {
   res.status(503).json({ error: 'Database unavailable' });
 }
 
+/**
+ * A round with everything the archive shows: the entry recorded as its winner, that
+ * round's challenge leaderboard, and how many people took part.
+ *
+ * The winner is read by id and never recomputed from the vote table — it is the entry
+ * an administrator approved, and a later retraction or rejection does not move it. It
+ * comes back as a whole submission rather than an id because the archive shows the map,
+ * and would otherwise need a request per round. winner_status says how far it has got,
+ * so the row is returned whether pending or official; a tied round has none yet.
+ *
+ * One query per round for the winner and one for its leaderboard. That is deliberate:
+ * the leaderboard's ORDER depends on that round's own challenge requirement, and
+ * routing every read through listForRound keeps exactly one implementation of that
+ * ordering rather than a second one in JavaScript that could drift from it. The archive
+ * holds one row per month the community has run, so the count is small and bounded.
+ */
+async function toRoundDetail(row: RoundRow, participants: number) {
+  const winner =
+    row.winning_submission_id === null ? null : await findSubmission(row.winning_submission_id);
+
+  const scores = await listForRound(row.id, winner?.challenge_requirement ?? '');
+
+  return {
+    ...toApiRound(row),
+    winner: winner ? toApiSubmission(winner) : null,
+    leaderboard: scores.map((score, i) => toApiChallengeScore(score, i + 1)),
+    participants,
+  };
+}
+
 // GET /api/rounds/current — the open round, or null when none is running.
 // Declared before /:id so "current" is never parsed as an id.
+//
+// Deliberately lean: no winner, no leaderboard. Every page loads this on every render,
+// and the two callers that want the detail ask for it by id.
 router.get('/current', async (_req, res) => {
   try {
     const row = await findCurrent();
@@ -24,29 +65,21 @@ router.get('/current', async (_req, res) => {
   }
 });
 
-// GET /api/rounds — every round, newest first (the archive list).
+// GET /api/rounds — every round, newest first, in full. This is the archive.
 router.get('/', async (_req, res) => {
   try {
     const rows = await listAll();
-    res.json(rows.map(toApiRound));
+    const counts = await participantCounts(rows.map((row) => row.id));
+    const detailed = await Promise.all(
+      rows.map((row) => toRoundDetail(row, counts.get(row.id) ?? 0))
+    );
+    res.json(detailed);
   } catch (err) {
     dbDown(res, err, 'list');
   }
 });
 
-// GET /api/rounds/:id — one round, with the entry recorded as its winner.
-//
-// The winner is read by id, never recomputed from the vote table: it is the entry an
-// administrator approved, and a later retraction or rejection does not move it. It
-// comes back as a whole submission rather than an id because the archive shows the
-// map, and would otherwise need a second request per round.
-//
-// winner_status says how far it has got, so the row is returned whether it is
-// pending or official — the caller decides how to label it. A tied round has no
-// recorded entry yet, so winner is null there.
-//
-// TODO: the archive also wants this round's challenge leaderboard. challenge_scores
-// has no read path yet (roadmap E1), so it is absent rather than empty.
+// GET /api/rounds/:id — one round, in the same shape as the list.
 router.get('/:id', async (req, res) => {
   if (!/^\d+$/.test(req.params.id)) {
     res.status(400).json({ error: 'Round id must be a positive integer' });
@@ -60,10 +93,8 @@ router.get('/:id', async (req, res) => {
       return;
     }
 
-    const winner =
-      row.winning_submission_id === null ? null : await findSubmission(row.winning_submission_id);
-
-    res.json({ ...toApiRound(row), winner: winner ? toApiSubmission(winner) : null });
+    const counts = await participantCounts([row.id]);
+    res.json(await toRoundDetail(row, counts.get(row.id) ?? 0));
   } catch (err) {
     dbDown(res, err, 'get');
   }

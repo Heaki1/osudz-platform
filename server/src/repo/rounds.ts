@@ -191,6 +191,33 @@ export async function findCurrent(): Promise<RoundRow | null> {
   return current.phase === 'ended' ? null : current;
 }
 
+/**
+ * How many distinct people took part in each of the given rounds.
+ *
+ * "Took part" is the union of three things: entering a beatmap, casting a vote, and
+ * posting a challenge score. Any one of them is participation, and someone who did all
+ * three is one person — which is why this is a UNION over (round_id, user_id) rather
+ * than three counts added together.
+ */
+export async function participantCounts(roundIds: number[]): Promise<Map<number, number>> {
+  if (roundIds.length === 0) return new Map();
+
+  const { rows } = await pool.query<{ round_id: number; participants: string }>(
+    `SELECT round_id, count(*)::text AS participants
+       FROM (
+         SELECT round_id, user_id FROM submissions       WHERE round_id = ANY($1::int[])
+         UNION
+         SELECT round_id, user_id FROM votes             WHERE round_id = ANY($1::int[])
+         UNION
+         SELECT round_id, user_id FROM challenge_scores  WHERE round_id = ANY($1::int[])
+       ) taken
+      GROUP BY round_id`,
+    [roundIds]
+  );
+
+  return new Map(rows.map((row) => [row.round_id, Number(row.participants)]));
+}
+
 export async function listAll(): Promise<RoundRow[]> {
   const { rows } = await pool.query<RoundRow>(
     `SELECT ${COLUMNS} FROM rounds ORDER BY round_number DESC`
