@@ -153,6 +153,40 @@ fix it as its own item with its own commit.
                Storing access and refresh tokens is the third option and the only
                one that can import unattended; it is also the only one that
                creates a credential store worth stealing.
+      THE THREE DESIGNS, COMPARED — AND WHY NONE OF THEM IS NEEDED (probed 2026-09-04
+      against the live osu! API with the application's own client-credentials token,
+      read-only, no code changed):
+
+            GET /users/2/beatmapsets/favourite?limit=3   ->  200, array(3)
+            GET /users/4452992/beatmapsets/favourite     ->  200, array(3)
+
+      A player's favourite beatmapsets are PUBLIC PROFILE DATA. The app token that
+      services/osu.ts already mints and caches for beatmap lookups reads them
+      directly, and each set arrives with everything the favorites UI needs:
+      beatmapset id, title, artist, creator, status, covers.cover, preview_url and
+      the difficulty list.
+
+      So the comparison resolves by dissolving:
+        (a) import during the login round trip — unnecessary. It also refreshes only
+            at login, which is the worst of the three for a button the player presses
+            deliberately.
+        (b) a dedicated "reconnect to osu!" authorize hop — unnecessary. It was the
+            preferred option only because it avoided storage; the app token avoids
+            storage AND the hop, so preferring (b) now would be a round trip through
+            osu! for data the server can already read.
+        (c) store access and refresh tokens — unnecessary, and it was always the only
+            option that created a credential store worth stealing. Its one unique
+            advantage was unattended import; the app token has that too.
+      RECOMMENDATION  Read the caller's favourites with the existing app token. No
+      token storage, no new scope, no extra authorize hop, and nothing per-user is
+      persisted but the favourites themselves. The osu! account is identified by
+      users.osu_id, which the session already carries.
+      CONSEQUENCE  The token-storage question is now closed for favourites as well as
+      for scores (see E2). Nothing in this project needs a stored user token.
+      NOTE  This reads what the player has favourited ON OSU!, which is public. It is
+      not the same set as the osu!DZ community favorites (A4) and must never be merged
+      into them — the decision on that stands.
+
       VERIFY press the button; the imported maps appear tagged as osu! favorites;
              existing community favorites are all still present and unchanged;
              pressing it twice does not duplicate rows.
@@ -556,7 +590,61 @@ fix it as its own item with its own commit.
       item only if that is wanted, in which case it also needs G6 — a stateless
       30-day session cookie means a ban does not end the session already in flight.
 
-  C7  Audit the admin tabs, then wire or retire them                     [TODO]
+  C7  Audit the admin tabs, then wire or retire them              [IN PROGRESS]
+      PHASE ONE, THE AUDIT: DONE, below. Phase two — wiring or retiring — waits on
+      C4, C5, E4 and G5, plus one owner decision named at the end.
+
+      THE AUDIT, at 1fbb316. Seven tabs in AdminDashboard.tsx:15, two in WIRED_TABS.
+
+      round        WIRED. Real: PATCH /admin/round/phase, POST /admin/rounds, POST
+                   /round/close-voting, POST /round/winner, GET /round/tiebreak, and
+                   GET /admin/submissions inside WinnerPanel. Claimed by C1, C2, D2,
+                   B10. Keep.
+      submissions  WIRED. Real: GET /admin/submissions, PATCH /admin/submissions/:id.
+                   Claimed by A1. Keep.
+      eligibility  UI ONLY. Renders a hardcoded COUNTRIES list of five with toggles,
+                   and two fabricated exception rows — 'Rimuru_dz' with the note
+                   "Community founder" and 'Saya_Kizuname' with "Diaspora exception".
+                   No API calls; toggling saves nothing. Claimed: the allowlist half
+                   by C4, the exceptions half by C5. Wire, do not delete. The two
+                   invented rows must go with the wiring.
+      rules        UI ONLY. Star range, length range, allowed statuses, and a "Save
+                   Rules" button that does nothing. No API. NOT obsolete, contrary to
+                   the first reading of this item: my_plan.txt:430-431 requires
+                   submissions to "satisfy administrator-defined star rating limits"
+                   and "length limits", and :749-752 lists allowed statuses, star
+                   limits, length limits and metadata restrictions as things an admin
+                   configures. Nothing in the server enforces any of it — the only
+                   status rule is the hardcoded SUBMITTABLE_STATUSES in
+                   services/osu.ts, and there is no star or length check anywhere in
+                   the submit path. So this tab is a roadmap GAP, not a dead tab. See
+                   C8 below.
+      challenge    UI ONLY, and two different things. The mod list and challenge-type
+                   list are claimed by my_plan.txt:754-757 ("Create/edit: mod
+                   requirements, challenge types") and duplicate ALLOWED_MODS and
+                   ALLOWED_CHALLENGE_TYPES, which are hardcoded in
+                   repo/submissions.ts and not configurable — another roadmap gap,
+                   C9 below. The bounty textarea is E4, which already has an owner.
+      users        UI ONLY. Renders six fabricated players — SAMPLE_USERS, with
+                   invented ranks and one banned — and a Ban/Unban button that
+                   mutates local state. Claimed by C5. Wire, do not delete; the
+                   fabricated rows must go.
+      config       UI ONLY, and three separable things.
+                   - Discord webhook: claimed by G5. DISCORD_WEBHOOK is in
+                     server/.env and .env.example; nothing in server/src reads it.
+                   - Site name, "Max Submissions Per User / Round", maintenance mode:
+                     these correspond to NOTHING in my_plan.txt or this roadmap. The
+                     server allows exactly one entry per user per round through a
+                     unique constraint, so the max-submissions input is not a setting
+                     that exists. THIS IS THE ONE OWNER DECISION THIS AUDIT PRODUCES.
+
+      VERDICT  Nothing is obsolete. Five tabs are unwired, and four of the five are
+               claimed — two by items already on the roadmap (C4, C5, E4, G5) and two
+               by plan requirements the roadmap had simply missed (C8, C9). Only three
+               controls inside `config` are genuinely unclaimed.
+      OWNER DECISION NEEDED  Site name, max submissions per user per round, and
+               maintenance mode: build them, or delete those three controls? Nothing
+               else in this audit needs a decision.
       DECIDED  INSPECT FIRST. Identify exactly which tabs are meant, what each one
                renders today, and where it is used. Delete nothing until what is
                obsolete has been named and the reason written down. A tab that a
@@ -588,6 +676,33 @@ fix it as its own item with its own commit.
              5 COMMIT    "docs: audit the admin tabs" then one per tab afterwards
              6 VERIFY    git log -1 --stat; git status --short clean
 
+
+  C8  Administrator-defined beatmap rules, enforced on submit    [TODO — NEW, C7]
+      SURFACED BY the C7 audit, not previously on this roadmap. The `rules` admin tab
+      has always rendered star limits, length limits and allowed statuses with a Save
+      button that does nothing, and my_plan.txt:430-431 and :749-752 require exactly
+      those to be administrator-defined. Nothing enforces any of it: the only rule in
+      the server is the hardcoded SUBMITTABLE_STATUSES in services/osu.ts, and the
+      submit path never looks at stars or length.
+      WHAT   A settings store (a single-row table, or a per-round set — an owner
+             decision in itself), the limits applied in POST /api/submissions and in
+             the lookup preview so a player is told before they submit, and the tab
+             wired to read and write them.
+      WHY    The tab promises configuration that does not exist, which is worse than
+             no tab; and a submission today can be any star rating or length at all.
+      DEPS   none technically. Needs one decision: global settings or per-round?
+      STATUS Not started. Flagged for the owner rather than assumed into scope.
+
+  C9  Configurable mods and challenge types                      [TODO — NEW, C7]
+      SURFACED BY the C7 audit. ALLOWED_MODS and ALLOWED_CHALLENGE_TYPES are hardcoded
+      in server/src/repo/submissions.ts and duplicated by hand in the `challenge`
+      admin tab, where editing them saves nothing. my_plan.txt:754-757 asks for both
+      to be creatable and editable.
+      WHAT   Move both lists into the same settings store C8 needs, validate
+             submissions against the stored lists, and wire the tab.
+      WHY    Two copies of the same list, one of which is a lie.
+      DEPS   C8's store, so they land together or C9 waits.
+      STATUS Not started. Flagged for the owner.
 
 # D. WINNER / RESULTS  ← the pivot for E and F
 
@@ -826,8 +941,23 @@ fix it as its own item with its own commit.
              anticipated in the schema and neither was built.
       DEPS   D3 (the winning difficulty must be a stored fact), E1 (the table's
              routes), and possibly A5 — see the token question below.
-      OPEN QUESTION, cheap to settle: can the application's client-credentials
-             token read another account's score, or is a user token required?
+      ANSWERED, 2026-09-04: the application's client-credentials token CAN read
+             another account's score. Probed live, read-only:
+               GET /beatmaps/131891/scores            -> 200, 50 scores
+               GET /beatmaps/131891/scores/users/5182050 -> 200, { position, score }
+             The user id was sampled off that public leaderboard, so this is a real
+             third party's score read with nothing but the app token. The score object
+             carries every column challenge_scores needs: id -> osu_score_id,
+             total_score -> score, accuracy (a 0..1 FRACTION, so store it as a
+             percentage for numeric(5,2)), statistics.count_miss -> misses, mods ->
+             mods, plus rank, passed and ended_at. Note mods arrive either as plain
+             acronym strings or as { acronym, settings } objects depending on the
+             score's era — normalise both.
+             CONSEQUENCE: no per-user token is needed for scores, and A5 found the
+             same is true of favourites. The token-storage question is closed.
+      (the original question, kept for the record) can the application's
+             client-credentials token read another account's score, or is a user token
+             required?
              server/src/services/osu.ts:110-140 already mints a client-credentials
              token with scope 'public'. One request settles it, with no code change:
                curl -H "Authorization: Bearer <app token>"                  https://osu.ppy.sh/api/v2/beatmaps/4907876/scores/users/<osu id>
@@ -935,9 +1065,16 @@ fix it as its own item with its own commit.
 # G. OAUTH / SECURITY
 
   G1  Delete or reset osu! application 66562                             [TODO]
-      WHAT   Its client secret is reportedly still live after being leaked.
-             Delete the application or reset the secret, then update
-             OSU_CLIENT_SECRET in server/.env.
+      FINDING, 2026-09-04: server/.env now has OSU_CLIENT_ID=67250. The project has
+      already been moved to a DIFFERENT application, and the app token minted from
+      .env authenticates successfully against the osu! API. So 66562 is no longer the
+      credential this repo uses — which lowers the urgency but does not close the
+      item: if 66562 still exists with a live leaked secret, anyone can still
+      impersonate that application. Deleting it is the remaining work, and rotating
+      .env is already done.
+      WHAT   Its client secret is reportedly still live after being leaked. Delete
+             application 66562 outright — there is no longer any reason to keep it,
+             since the project authenticates as 67250.
       WHY    A live leaked secret lets anyone impersonate this application
              against the osu! API.
       DEPS   none. Operational — Heaki only; no code change, and nothing in the
@@ -1167,9 +1304,15 @@ fix it as its own item with its own commit.
 
 # QUESTIONS OF FACT, NOT DECISIONS
 
-  - Can the application's client-credentials token read another player's score on
-    a beatmap, or is a user token required? One curl settles it; the command is in
-    E2. Its answer decides whether the A5 token question reaches scores too.
+  - ANSWERED, 2026-09-04. Can the application's client-credentials token read
+    another player's score on a beatmap? Yes — 200, with a user id sampled off the
+    map's own public leaderboard. And the same token reads a player's public
+    favourite beatmapsets, which A5 had assumed needed user context. Both probes are
+    recorded in E2 and A5 respectively.
+    CONSEQUENCE, and it is the largest single simplification left on this roadmap:
+    NOTHING in this project needs a stored osu! user token. E2's fetch, A5's import
+    and every beatmap read all go through the app token that services/osu.ts already
+    mints and caches. No credential store, no new scope, no second authorize hop.
 
   - ANSWERED. Does keeping phase at 'voting' during the pending window mislead any
     existing consumer? It misled three of the four, and all four are now fixed.
