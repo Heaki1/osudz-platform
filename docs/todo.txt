@@ -1339,7 +1339,34 @@ fix it as its own item with its own commit.
       and THE LOOP's step 3 above now names them instead of the raw command. Both
       pass; the build is unaffected.
 
-  H2  A test runner, and the first tests worth having                     [TODO]
+  H2  A test runner, and the first tests worth having                    [DONE]
+      LANDED: vitest, and 45 tests over 6 files — 22 client, 23 server. `npm test` runs
+      both; `npm test` inside server/ delegates to the same server suite.
+      COVERED, chosen as the logic that breaks silently: formatCountdown (including the
+      NaN and exactly-on-the-deadline cases), pageAccess (early vs closed vs no-round),
+      isBallotOpen (the pending and tiebreak window, which is the whole reason it exists),
+      toCurrentRound (an ended round reading as none, and the winner fields carrying
+      through), toBeatmap and beatmapUrl, REVIEW_PRESENTATION, canTransition (with
+      voting -> challenge asserted FALSE, since that is the winner-approval gate),
+      isRoundPhase, isEligible (padding and case, both of which have bitten it),
+      splitMods and the Classic marker, qualifies across absolute and relative
+      requirements, orderFor, and parseDifficultyId including the set-only link.
+      PROVED THE TESTS BITE, which this item's VERIFY asked for: breaking pageAccess's
+      phase comparison failed exactly two tests with readable assertions, and restoring
+      it returned all 22 to green.
+      TWO CONFIG DECISIONS, both documented in the config files. Separate client and
+      server configs rather than a workspace, because two scripts work on any vitest
+      version and the halves need different resolution anyway. And the server config
+      carries a resolver plugin that maps NodeNext's '.js' specifiers to the '.ts' files
+      on disk — tsc understands that mapping and Vite does not — plus fixed placeholder
+      env values, so a unit test never reads server/.env and can never touch a real
+      credential.
+      NOT DONE, and deliberately: the vote refusal matrix as supertest cases. Those need
+      a live database and a forged session; verify-authenticated.mjs covers that ground
+      with a real session instead, which is both safer and closer to what ships.
+      INSTALL NOTE: this repo is pnpm, and `npm install` fails on it with
+      EUNSUPPORTEDPROTOCOL over a workspace:* reference. vitest went in with `pnpm add -D
+      vitest`. Use pnpm for dependencies here.
       WHAT   vitest in both packages, then tests for the pure logic that is
              easiest to break silently: pageAccess and formatCountdown in
              src/lib/round.ts, toBeatmap and REVIEW_PRESENTATION in
