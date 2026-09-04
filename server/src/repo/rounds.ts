@@ -87,11 +87,108 @@ const COLUMNS = `id, round_number, phase, month, year, reward,
                  winner_status, winning_submission_id, winner_vote_count,
                  total_votes, winner_approved_by, winner_approved_at`;
 
+// ── The clock ────────────────────────────────────────────────────────────────
+//
+// There is no scheduler process. Reading the open round is what makes time pass:
+// findCurrent applies whatever the configured deadlines are owed before it returns,
+// so the vote endpoints, the submission endpoints, the admin routes and the client's
+// own read all see one phase, and none of them can act on a round the clock has
+// already moved past. The cost is that the archive list, which does not go through
+// findCurrent, can name a stale phase until someone reads the open round — and the
+// client reads it on every page load.
+//
+// Exactly one step of the chain is not automatic:
+//
+//   submission --(submission_ends_at)--> voting                     automatic
+//   voting     --(voting_ends_at)------> the ballot closes: winner  automatic
+//                                        pending or tied, phase
+//                                        still 'voting'
+//   voting     --(an admin approves)---> challenge                  ADMIN ONLY
+//   challenge  --(challenge_ends_at)---> ended, which is the        automatic
+//                                        archive
+//   (opening the next round)                                        ADMIN ONLY
+//
+// A round left alone can be owed more than one of these, so they are applied in
+// order in a single pass. The pass always stops at the approval: no deadline can
+// stand in for an administrator confirming a winner.
+
+const isDue = (endsAt: Date | null): boolean => endsAt !== null && endsAt.getTime() <= Date.now();
+
+/**
+ * Moves a round on because its deadline passed, or returns null if it did not move.
+ *
+ * The phase in the WHERE clause is what makes this safe to run from concurrent
+ * reads: the first caller's UPDATE matches, and every later one finds the phase
+ * already moved and matches nothing. The comparison uses the database's now(), so an
+ * app clock running fast cannot advance a round early — it simply leaves the move to
+ * the next read. The column name is a fixed lookup on an already-narrowed phase,
+ * never request text.
+ */
+async function advanceOnDeadline(
+  id: number,
+  from: LivePhase,
+  to: RoundPhase
+): Promise<RoundRow | null> {
+  // The clock must not be a second, laxer set of rules: if a future edit to
+  // NEXT_PHASES makes one of these moves illegal for an administrator, it is illegal
+  // here too rather than quietly staying automatic.
+  if (!canTransition(from, to)) return null;
+
+  const { rows } = await pool.query<RoundRow>(
+    `UPDATE rounds
+        SET phase = $3
+      WHERE id = $1 AND phase = $2 AND ${END_COLUMN[from]} <= now()
+      RETURNING ${COLUMNS}`,
+    [id, from, to]
+  );
+  return rows[0] ?? null;
+}
+
+/** Applies every transition the round is owed, in order, and returns where it lands. */
+async function applyDueTransitions(round: RoundRow): Promise<RoundRow> {
+  let current = round;
+
+  if (current.phase === 'submission' && isDue(current.submission_ends_at)) {
+    current = (await advanceOnDeadline(current.id, 'submission', 'voting')) ?? current;
+  }
+
+  // The deadline closes the ballot; it does not move the phase. closeVoting locks the
+  // row and refuses a round whose winner_status has already left 'none', so two
+  // concurrent reads cannot both count the same ballot.
+  if (
+    current.phase === 'voting' &&
+    current.winner_status === 'none' &&
+    isDue(current.voting_ends_at)
+  ) {
+    const outcome = await closeVoting(current.id);
+    if (outcome.ok) current = outcome.round;
+    // 'no-entries' leaves the ballot open deliberately. A round with nothing approved
+    // has no winner to record, and closing it would strand it in a state only a
+    // result correction could leave; an administrator decides what to do instead.
+  }
+
+  if (current.phase === 'challenge' && isDue(current.challenge_ends_at)) {
+    current = (await advanceOnDeadline(current.id, 'challenge', 'ended')) ?? current;
+  }
+
+  return current;
+}
+
+/**
+ * The open round, with the clock applied. Null when nothing is open — including the
+ * case where this call is what archived it: an auto-archived round is not current, so
+ * every page reads "no active round" until an administrator opens the next one, which
+ * is the decision rather than a gap.
+ */
 export async function findCurrent(): Promise<RoundRow | null> {
   const { rows } = await pool.query<RoundRow>(
     `SELECT ${COLUMNS} FROM rounds WHERE phase <> 'ended' ORDER BY round_number DESC LIMIT 1`
   );
-  return rows[0] ?? null;
+  const open = rows[0];
+  if (!open) return null;
+
+  const current = await applyDueTransitions(open);
+  return current.phase === 'ended' ? null : current;
 }
 
 export async function listAll(): Promise<RoundRow[]> {

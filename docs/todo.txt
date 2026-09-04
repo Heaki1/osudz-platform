@@ -313,7 +313,18 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: record when a vote was last changed"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  B10 Tiebreak state, resolved by an administrator                       [TODO]
+  B10 Tiebreak state, resolved by an administrator                        [DONE]
+      LANDED WITH D2, as this item's DEPS said it would. closeVoting writes
+      winner_status 'tiebreak' and a round_tiebreak_entries row per level entry;
+      approveWinner refuses a submissionId that is not among them ('not-tied') and
+      refuses to proceed at all without one ('needs-selection'), then sets the winner
+      and 'official' in the same write and clears the candidate rows. GET
+      /admin/round/tiebreak lists them, and AdminDashboard's WinnerPanel renders them
+      as a chooser that will not approve until one is picked. The vote page states the
+      tie without the admin-only list, reading the entries level with the frozen count
+      (B7). Nothing resolves a tie on its own: with no votes at all every entry is
+      level on zero, which is a tie like any other rather than a win for whichever row
+      sorted first — the incidental behaviour this item was written to kill.
       DECIDED  A tie is never resolved automatically. When voting ends with two or
                more entries level at the top, the round pauses in a TIEBREAK state
                until an administrator selects one winner, which then follows the
@@ -391,7 +402,34 @@ fix it as its own item with its own commit.
       Landed in c84598a. Create a round, advance phases, cascade the schedule,
       rounds_single_open keeps exactly one round live.
 
-  C2  Automatic phase progression, admin override kept                   [TODO]
+  C2  Automatic phase progression, admin override kept                   [DONE]
+      LANDED: there is no scheduler process, so reading the open round is what makes
+      time pass. findCurrent applies whatever the deadlines are owed before it
+      returns, which puts one phase in front of every consumer at once — the vote
+      endpoints, the submission endpoints, the admin routes and the client all call
+      it, so none of them can act on a round the clock has already moved past.
+      A round left alone can be owed more than one step, so they are applied in order
+      in one pass: submission -> voting, then the ballot close, then challenge ->
+      ended. The pass always stops at the approval; no deadline stands in for an
+      administrator confirming a winner.
+      Races: the phase is in the UPDATE's WHERE clause, so the first concurrent read
+      wins and later ones match nothing, and the ballot close is already refused once
+      winner_status leaves 'none'. Clocks: the comparison uses the database's now(),
+      so an app clock running fast leaves the move to the next read rather than
+      advancing early. The automatic path also asks canTransition, so the clock can
+      never do a move the admin endpoint is refused.
+      A round with nothing approved is left alone on purpose — 'no-entries' keeps the
+      ballot open rather than closing it into a state only a result correction could
+      undo, and an administrator decides.
+      NOT DONE, and it is not in this item's WHAT: my_plan.txt:773 also wants the UI
+      to say the round is automated. The countdowns are now truthful, which is most of
+      it; explicit "advances automatically" copy is a suggestion for the owner, not
+      something this item claimed.
+      STILL TO VERIFY, in the final pass: the deadline behaviour needs a deadline that
+      has actually passed. Nothing is due on the local instance (voting ends
+      2026-09-13), so the tick was confirmed only as a no-op. The check is in this
+      item's VERIFY and needs an admin session to move a deadline via PATCH
+      /api/admin/round/phase with endsAt, not a hand-written UPDATE.
       DECIDED  Submission -> Voting -> Challenge -> Archive advances automatically
                on the configured phase end times, with one exception: Voting ->
                Challenge requires winner approval. Administrators may also advance
