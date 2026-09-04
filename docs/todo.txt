@@ -1520,6 +1520,67 @@ fix it as its own item with its own commit.
     The model itself held up — nothing needed a new phase value.
 
 
+# WHAT REMAINS, AND WHAT BLOCKS EACH  (2026-09-05)
+
+Thirty-one items are DONE. Fifteen are not, and they fall into three groups. Nothing is
+merely unstarted for lack of time: every one is waiting on a migration only the owner can
+apply, on a decision only the owner can make, or on the owner's osu! account.
+
+  WAITING ON ONE MIGRATION EACH — the code is not written, because writing it against a
+  table that does not exist yet means shipping something nobody can run. Each needs DDL
+  applied by the owner (never by me), so they are best done as one batch: write one
+  migration covering all of them, hand over a single `pnpm run migrate`, then implement.
+
+    A4  community favorites            a favorites table (user_id, difficulty_id, source)
+    A5  import osu! favorites          A4's store. The token question is SETTLED — the app
+                                       token reads public favourites, so no storage and no
+                                       second authorize hop. Only the table is missing.
+    B8  comments on submissions        a comments table
+    B9  when a vote was last moved     votes.updated_at
+    C4  country allowlist              an allowed_countries table
+    C5  per-participant permissions    a participant_permissions table
+    D4  admin result correction        audit columns on rounds
+    G6  session revocation             a revocation store, or a session table
+
+  WAITING ON A DECISION FROM THE OWNER
+
+    C7 phase two   Five admin tabs are unwired. Four are claimed by the items above and by
+                   E4/G5, which are done. The audit named ONE genuine question: site name,
+                   "max submissions per user / round", and maintenance mode correspond to
+                   nothing in my_plan.txt or this roadmap, and the server enforces exactly
+                   one entry per user per round through a unique constraint, so that input
+                   is not a setting that exists. Build them, or delete those three
+                   controls?
+    C8, C9         Surfaced BY the audit, not previously on this roadmap: my_plan.txt
+                   requires administrator-defined star/length/status limits and editable
+                   mod and challenge-type lists, and nothing enforces or stores any of it.
+                   C8 also needs a decision of its own — global settings, or per-round?
+                   Both then need C8's store, so they are a migration item too.
+
+  WAITING ON THE OWNER'S ACCOUNT, OR ON WORK ABOVE
+
+    G1  delete osu! application 66562. Operational, and less urgent than it reads: .env is
+        already on OSU_CLIENT_ID=67250, so the leaked application is no longer the
+        credential this repo authenticates with. Deleting it is what is left.
+    H4  real beatmap search. Not blocked by anything — it is the one remaining item that
+        could be built today. It needs an osu! search endpoint and a new page's worth of
+        wiring, and it was ranked below the challenge, archive, security and test work
+        that took this session.
+    H5  the sample-data ledger. Down to two fixtures from five: favoriteBeatmaps needs A4,
+        searchBeatmaps needs H4. Nothing else in src/ is fabricated.
+    H6  still BLOCKED, on the same authenticated-testing gap that
+        verify-authenticated.mjs now partly closes.
+
+  ONE HANDOVER, FOR THE AUTHENTICATED HALF OF THIS PASS
+
+    node verify-authenticated.mjs "<osudz_session cookie value>"
+
+    Read-only unless --allow-writes. It covers what could not be verified from here: the
+    per-caller reads, every phase gate, the frozen-ballot refusals, the self-vote refusal,
+    admin gating in both directions, the attempt to skip winner approval through the
+    generic phase endpoint, and the rate limiter.
+
+
 # THE COMPREHENSIVE PASS, 2026-09-05
 
 What was verified, what was not, and why.
