@@ -228,9 +228,18 @@ fix it as its own item with its own commit.
   B7  Winner state and final standings on the vote page                 [TODO]
       WHAT   Once voting has closed, the vote page shows the read-only tally and
              the winner: pending admin approval, awaiting a tiebreak decision, or
-             official. Vote buttons are gone in all three cases. This is the
-             "winner" visual state the plan requires, not a new layout — it reuses
-             VoteStandings and the existing crown treatment.
+             official. This is the "winner" visual state the plan requires, not a
+             new layout — it reuses VoteStandings and the existing crown treatment.
+             REQUIRED, all three:
+               - the closed/pending/tiebreak state is stated plainly, so a reader
+                 knows voting is over and why nothing has been declared yet;
+               - every voting and retraction action is disabled — no vote button
+                 anywhere, including the flip card's back face;
+               - no active-voting countdown. Once voting closes the "Ends in ..."
+                 line must stop implying time remains: it reads 'ended' the moment
+                 voting_ends_at passes, and keeps counting toward a dead deadline
+                 if an admin closed voting early. Either is misleading, so the
+                 countdown is replaced rather than left to resolve itself.
       WHY    my_plan.txt:816 lists "winner" among the states that must exist, and
              :606 says the leader must not look final before voting closes — which
              implies it should look final afterwards. Right now the page shows only
@@ -588,11 +597,20 @@ fix it as its own item with its own commit.
              winner_vote_count, total_votes, winner_approved_by, winner_approved_at.
              A tied_submission_ids column or a small round_tied_entries table for
              the tiebreak case.
-             MUST ALSO close the bypass C3 left open: voting -> challenge has to
-             stop being reachable through PATCH /api/admin/round/phase, and
-             AdminDashboard.tsx:140's "Close Voting & Start Challenge" button has
-             to point at the approval endpoint instead. Without that, the approval
-             gate is decoration — the existing button walks past it.
+             MUST ALSO close the bypass C3 left open: remove voting -> challenge
+             from NEXT_PHASES so it is unreachable through PATCH
+             /api/admin/round/phase, and rework AdminDashboard.tsx:140's "Close
+             Voting & Start Challenge" action so that transition is only possible
+             once the winner is resolved and officially approved. Without both, the
+             approval gate is decoration — the existing button walks past it.
+             DECIDED  Once voting closes, BOTH POST /api/votes and DELETE
+             /api/votes are refused: nobody casts or retracts during the PENDING or
+             TIEBREAK window. Both endpoints gain winner_status === 'none' beside
+             their phase check. The totals are frozen at the moment voting closes,
+             in the same transaction that records the pending winner, so
+             winner_vote_count and total_votes can never diverge from the ballot
+             table. Gating only the cast path would let a voter withdraw after the
+             freeze and silently break that guarantee.
              Closing voting computes the top entry and writes 'pending' (or
              'tiebreak'), all inside one transaction. A second admin endpoint
              approves: it sets 'official', stamps who and when, and moves the phase
@@ -606,11 +624,12 @@ fix it as its own item with its own commit.
       DEPS   C3 (one legal transition direction). B10 lands with it — 'tiebreak' is
              one of this column's values.
       VERIFY seed a round with a clear leader and close voting: status 'pending',
-             the winner and both counts frozen, phase still 'voting', and a POST
-             /api/votes now answers 409; approve it: status 'official', phase
-             'challenge', approver stamped; retract a vote afterwards and none of
-             the frozen numbers move; approve again -> refused; a non-admin
-             approval -> 403.
+             the winner and both counts frozen, phase still 'voting', and BOTH POST
+             /api/votes and DELETE /api/votes answer 409; approve it: status
+             'official', phase 'challenge', approver stamped; the frozen numbers
+             have not moved; approve again -> refused; a non-admin approval -> 403;
+             PATCH /api/admin/round/phase with phase 'challenge' -> 409, because
+             that route no longer offers the transition at all.
       STEPS  1 INSPECT   server/src/routes/admin.ts, server/src/repo/rounds.ts,
                          server/src/repo/votes.ts, server/src/routes/votes.ts,
                          server/migrations/
