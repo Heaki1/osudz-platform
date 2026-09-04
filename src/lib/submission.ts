@@ -39,6 +39,36 @@ export function toBeatmap(submission: ApiSubmission): Beatmap {
 export const beatmapUrl = (submission: ApiSubmission): string =>
   `https://osu.ppy.sh/beatmapsets/${submission.beatmapsetId}#osu/${submission.difficultyId}`;
 
+/**
+ * How a review state is presented. Lives here rather than in a page because the
+ * dashboard and the submit page both show it, and two copies would drift.
+ *
+ * 'rejected' reads as "Changes Requested" by request. Note what that cannot yet
+ * promise: one submission per user per round, and no endpoint to delete or
+ * replace one, so a submitter cannot act on it alone — hence the blurb pointing
+ * at an administrator rather than at the submit form.
+ */
+export const REVIEW_PRESENTATION: Record<
+  ApiSubmission['reviewStatus'],
+  { label: string; tone: string; blurb: string }
+> = {
+  pending: {
+    label: 'Pending Review',
+    tone: 'bg-amber-400/10 border-amber-400/25 text-amber-400',
+    blurb: 'An administrator still has to approve this before it enters the community vote.',
+  },
+  approved: {
+    label: 'Approved',
+    tone: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
+    blurb: 'This beatmap is in the community vote for this round. Good luck!',
+  },
+  rejected: {
+    label: 'Changes Requested',
+    tone: 'bg-rose-500/10 border-rose-500/25 text-rose-400',
+    blurb: 'An administrator asked for changes. Replacing an entry is not possible yet — ask an administrator to look at it again.',
+  },
+};
+
 /** "2:19" from the preview's raw seconds — submissions arrive pre-formatted. */
 export const formatLength = (seconds: number): string =>
   `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;

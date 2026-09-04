@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Beatmap, Phase, PlatformPage } from '../../types';
-import { CurrentRound, roundLabel, useCountdown } from '../../lib/round';
+import { ApiSubmission } from '../../api/client';
+import { CurrentRound, formatDeadline, roundLabel, useCountdown } from '../../lib/round';
+import { beatmapUrl, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { favoriteBeatmaps, challengeScores } from './sampleData';
 import { AuthUser } from './NavHeader';
 import {
   Trophy, Crown, Upload, ChevronRight, RefreshCw,
-  CheckCircle2, AlertCircle, Clock, LogIn, X,
+  CheckCircle2, AlertCircle, Clock, LogIn, X, Link as LinkIcon,
 } from 'lucide-react';
 
 // ── INLINE LOGIN NUDGE ────────────────────────────────────────────────────────
@@ -181,12 +183,176 @@ function ChallengeLeaderboard({ roundNumber }: { roundNumber: number }) {
   );
 }
 
+// ── SUBMISSION PHASE PANELS ──────────────────────────────────────────────────
+
+function Stat({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl px-4 py-2.5 text-right min-w-[7.5rem]">
+      <div className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">{label}</div>
+      <div className={`text-lg font-black font-mono ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
+/**
+ * The count is of *approved* entries, not of everything received. GET
+ * /api/submissions serves approved rows only, and there is no public total, so
+ * showing anything else here would need a new API field.
+ */
+function SubmissionStatusBand({
+  round,
+  approvedCount,
+  countdown,
+}: {
+  round: CurrentRound;
+  approvedCount: number;
+  countdown: string;
+}) {
+  return (
+    <div className="bg-[#0d1526] border border-amber-400/20 rounded-2xl p-5">
+      <div className="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+            <h2 className="text-lg font-black text-white">
+              Round {round.roundNumber} — Submissions Open
+            </h2>
+          </div>
+          <p className="text-xs text-slate-500">
+            Closes {formatDeadline(round.schedule.submission)}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <Stat label="Closes in" value={countdown} tone="text-amber-400" />
+          <Stat label="Approved for voting" value={String(approvedCount)} tone="text-white" />
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-600 mt-4 leading-relaxed">
+        Entries stay private while submissions are open — only the number already approved is shown,
+        so nobody's pick is swayed by what is in already.
+      </p>
+    </div>
+  );
+}
+
+function YourSubmission({
+  submission,
+  onNavigate,
+}: {
+  submission: ApiSubmission | null;
+  onNavigate: (page: PlatformPage) => void;
+}) {
+  const copy = submission ? REVIEW_PRESENTATION[submission.reviewStatus] : null;
+
+  return (
+    <section>
+      <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-1">This round</p>
+      <h2 className="text-xl font-black text-white mb-5">Your Submission</h2>
+
+      {submission && copy ? (
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_1fr] gap-5 items-start">
+          <BeatmapCardPlatform beatmap={toBeatmap(submission)} />
+          <div className="bg-[#0d1526] border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div>
+              <span className={`inline-block text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full border ${copy.tone}`}>
+                {copy.label}
+              </span>
+              <p className="text-xs text-slate-500 mt-3 leading-relaxed">{copy.blurb}</p>
+            </div>
+            <div className="h-px bg-slate-800" />
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-2">
+                Challenge requirements
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-black font-mono bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg text-white">
+                  {submission.modRequirement}
+                </span>
+                <span className="text-sm font-bold bg-amber-400/10 border border-amber-400/25 px-3 py-1 rounded-lg text-amber-400">
+                  {submission.challengeRequirement}
+                </span>
+              </div>
+            </div>
+            <a
+              href={beatmapUrl(submission)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-amber-400 transition-colors"
+            >
+              <LinkIcon className="w-3.5 h-3.5" />
+              Open on osu!
+            </a>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-[#0d1526] border border-slate-800 rounded-2xl px-6 py-10 text-center">
+          <div className="w-14 h-14 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto mb-4">
+            <Upload className="w-6 h-6 text-slate-700" />
+          </div>
+          <p className="text-white font-bold mb-1">You haven't submitted a beatmap yet</p>
+          <p className="text-sm text-slate-500 mb-5 max-w-md mx-auto">
+            One submission per player per round. Pick a Ranked, Loved or Approved difficulty and set
+            the mod and challenge it should be played under.
+          </p>
+          <button
+            type="button"
+            onClick={() => onNavigate('submit')}
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm rounded-xl transition-all"
+          >
+            <Upload className="w-4 h-4" />
+            Submit a Beatmap
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The four rules the server actually enforces today. The submit page carries the full set. */
+function SubmissionRequirements({ onNavigate }: { onNavigate: (page: PlatformPage) => void }) {
+  const rules = [
+    'Ranked, Loved or Approved beatmap',
+    'A specific difficulty, not just the beatmapset',
+    'One submission per player per round',
+    'An Algerian osu! account',
+  ];
+
+  return (
+    <div className="bg-[#0d1526] border border-slate-800 rounded-2xl p-5">
+      <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+        <div className="flex items-center gap-2.5">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <h3 className="text-sm font-black text-white">Submission Requirements</h3>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate('submit')}
+          className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-amber-400 transition-colors"
+        >
+          Full requirements
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {rules.map((rule) => (
+          <div key={rule} className="flex items-start gap-2.5">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400/70 flex-shrink-0 mt-0.5" />
+            <span className="text-xs text-slate-400 leading-relaxed">{rule}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── DASHBOARD PAGE ───────────────────────────────────────────────────────────
 
 interface DashboardPageProps {
   round: CurrentRound | null;
   /** Approved submissions in the open round. Empty until an admin approves one. */
   maps: Beatmap[];
+  /** The signed-in user's own entry, whatever its review status. */
+  mySubmission: ApiSubmission | null;
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
@@ -207,7 +373,7 @@ function NoActiveRound() {
   );
 }
 
-export function DashboardPage({ round, maps, onNavigate, user, onLogin }: DashboardPageProps) {
+export function DashboardPage({ round, maps, mySubmission, onNavigate, user, onLogin }: DashboardPageProps) {
   const [userVote, setUserVote] = useState<string | null>(null);
   const [favorites, setFavorites] = useState(favoriteBeatmaps);
   // One ticking countdown for the page, called before the early return below so
@@ -247,7 +413,12 @@ export function DashboardPage({ round, maps, onNavigate, user, onLogin }: Dashbo
             />
           )}
 
-          {/* Submit CTA */}
+          <SubmissionStatusBand round={round} approvedCount={maps.length} countdown={countdown} />
+
+          {user && <YourSubmission submission={mySubmission} onNavigate={onNavigate} />}
+
+          {/* Submit CTA — dropped once there is an entry to show above. */}
+          {!mySubmission && (
           <div className="relative overflow-hidden bg-gradient-to-r from-amber-400/10 via-amber-400/5 to-transparent border border-amber-400/20 rounded-2xl p-6 flex items-center justify-between gap-6">
             <div className="absolute right-0 top-0 bottom-0 w-64 opacity-5">
               <Trophy className="w-full h-full text-amber-400" />
@@ -280,6 +451,9 @@ export function DashboardPage({ round, maps, onNavigate, user, onLogin }: Dashbo
               </button>
             )}
           </div>
+          )}
+
+          <SubmissionRequirements onNavigate={onNavigate} />
 
           {/* Favorites */}
           <section>

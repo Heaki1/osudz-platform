@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { PlatformPage } from '../../types';
 import { api, ApiBeatmapPreview, ApiSubmission } from '../../api/client';
 import { CurrentRound, roundLabel } from '../../lib/round';
-import { beatmapUrl, previewToBeatmap, toBeatmap } from '../../lib/submission';
+import { beatmapUrl, previewToBeatmap, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';
@@ -413,27 +413,9 @@ function LoginGate({ onLogin }: { onLogin?: () => void }) {
 
 type SubmitTab = 'url' | 'favorites';
 
-const REVIEW_COPY: Record<ApiSubmission['reviewStatus'], { label: string; tone: string; blurb: string }> = {
-  pending: {
-    label: 'Awaiting review',
-    tone: 'bg-amber-400/10 border-amber-400/25 text-amber-400',
-    blurb: 'An administrator still has to approve this before it appears in the community vote.',
-  },
-  approved: {
-    label: 'Approved',
-    tone: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
-    blurb: 'This beatmap is in the community vote for this round. Good luck!',
-  },
-  rejected: {
-    label: 'Rejected',
-    tone: 'bg-rose-500/10 border-rose-500/25 text-rose-400',
-    blurb: 'An administrator rejected this entry, so it is not in the vote.',
-  },
-};
-
 /** One submission per user per round, so once there is one there is nothing to add. */
 function MySubmission({ submission }: { submission: ApiSubmission }) {
-  const copy = REVIEW_COPY[submission.reviewStatus];
+  const copy = REVIEW_PRESENTATION[submission.reviewStatus];
 
   return (
     <div className="space-y-5">
@@ -474,32 +456,25 @@ function MySubmission({ submission }: { submission: ApiSubmission }) {
 
 interface PlatformSubmitPageProps {
   round: CurrentRound | null;
+  /** The caller's entry in the open round, fetched once in App. */
+  mySubmission: ApiSubmission | null;
+  loading: boolean;
+  onSubmitted: (submission: ApiSubmission) => void;
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
 }
 
-export function PlatformSubmitPage({ round, onNavigate, user, onLogin }: PlatformSubmitPageProps) {
+export function PlatformSubmitPage({
+  round,
+  mySubmission,
+  loading,
+  onSubmitted,
+  onNavigate,
+  user,
+  onLogin,
+}: PlatformSubmitPageProps) {
   const [tab, setTab] = useState<SubmitTab>('url');
-  const [mine, setMine] = useState<ApiSubmission | null>(null);
-  const [loadingMine, setLoadingMine] = useState(true);
-
-  // Reloads when the round changes, so archiving a round clears last month's entry.
-  useEffect(() => {
-    if (!user) {
-      setMine(null);
-      setLoadingMine(false);
-      return;
-    }
-    let cancelled = false;
-    setLoadingMine(true);
-    api.submissions.mine().then((submission) => {
-      if (cancelled) return;
-      setMine(submission);
-      setLoadingMine(false);
-    });
-    return () => { cancelled = true; };
-  }, [user, round?.id]);
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 pb-16">
@@ -516,13 +491,13 @@ export function PlatformSubmitPage({ round, onNavigate, user, onLogin }: Platfor
         <LoginGate onLogin={onLogin} />
       ) : round?.phase !== 'submission' ? (
         <SubmissionClosed onNavigate={onNavigate} />
-      ) : loadingMine ? (
+      ) : loading ? (
         <div className="flex items-center gap-3 py-16 justify-center text-slate-600">
           <span className="w-4 h-4 border-2 border-slate-700 border-t-slate-400 rounded-full animate-spin" />
           <span className="text-sm">Checking your submission…</span>
         </div>
-      ) : mine ? (
-        <MySubmission submission={mine} />
+      ) : mySubmission ? (
+        <MySubmission submission={mySubmission} />
       ) : (
         <>
           <EligibilityPanel />
@@ -555,7 +530,7 @@ export function PlatformSubmitPage({ round, onNavigate, user, onLogin }: Platfor
             </button>
           </div>
 
-          {tab === 'url'       && <UrlTab onSubmitted={setMine} />}
+          {tab === 'url'       && <UrlTab onSubmitted={onSubmitted} />}
           {tab === 'favorites' && <FavoritesTab />}
         </>
       )}

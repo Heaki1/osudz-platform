@@ -6,7 +6,7 @@ import { SearchPage } from './components/platform/SearchPage';
 import { AdminDashboard } from './components/platform/AdminDashboard';
 import { PlatformSubmitPage } from './components/platform/PlatformSubmitPage';
 import { ArchivePage } from './components/platform/ArchivePage';
-import { api, ApiUser } from './api/client';
+import { api, ApiSubmission, ApiUser } from './api/client';
 import { CurrentRound, toCurrentRound } from './lib/round';
 import { toBeatmap } from './lib/submission';
 import { Beatmap, Phase, PlatformPage } from './types';
@@ -26,6 +26,8 @@ export default function App() {
   const [round, setRound] = useState<CurrentRound | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [maps, setMaps] = useState<Beatmap[]>([]);
+  const [mySubmission, setMySubmission] = useState<ApiSubmission | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [playState, setPlayState] = useState<PlayState | null>(null);
 
   // The round is the single source of the phase. With no round open — or with the
@@ -33,15 +35,20 @@ export default function App() {
   // their actual behaviour off `round` being null.
   const phase: Phase = round?.phase ?? 'submission';
 
-  // Round and approved submissions travel together: approving an entry or
-  // advancing a phase changes both, so admin actions reload the pair.
+  // Round, approved submissions and the caller's own entry travel together:
+  // approving an entry or advancing a phase changes all three, so admin actions
+  // reload the set. /submissions/mine answers null when signed out, so it is safe
+  // to ask for before the session is known.
   const refresh = useCallback(async () => {
-    const [current, submissions] = await Promise.all([
+    const [current, submissions, mine] = await Promise.all([
       api.rounds.current(),
       api.submissions.list(),
+      api.submissions.mine(),
     ]);
     setRound(toCurrentRound(current));
     setMaps((submissions ?? []).map(toBeatmap));
+    setMySubmission(mine);
+    setLoaded(true);
   }, []);
 
   // Restore the session on load. api.auth.me() resolves to null both when signed
@@ -71,6 +78,8 @@ export default function App() {
     setPlatformUser(null);
     // Leaving the admin page on logout, so a stale admin view cannot linger.
     setPlatformPage((page) => (page === 'admin' ? 'dashboard' : page));
+    // Drops the previous account's own submission along with the session.
+    void refresh();
   };
 
   const handleTogglePlay = (id: string) => {
@@ -154,6 +163,7 @@ export default function App() {
           <DashboardPage
             round={round}
             maps={maps}
+            mySubmission={mySubmission}
             onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}
@@ -177,6 +187,9 @@ export default function App() {
         {platformPage === 'submit' && (
           <PlatformSubmitPage
             round={round}
+            mySubmission={mySubmission}
+            loading={!loaded}
+            onSubmitted={setMySubmission}
             onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}
