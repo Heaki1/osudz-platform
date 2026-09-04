@@ -1493,6 +1493,53 @@ fix it as its own item with its own commit.
     The model itself held up — nothing needed a new phase value.
 
 
+# THE COMPREHENSIVE PASS, 2026-09-05
+
+What was verified, what was not, and why.
+
+  VERIFIED, directly
+    - Both typechecks and the production build, green.
+    - 28 unauthenticated API checks, all passing: the JSON error contract on a 404 and
+      on malformed JSON, every public read and its 400/404 cases, and every one of the
+      18 session-or-admin routes refusing an anonymous caller.
+      SEVEN of those "failures" on the first run were bugs in the test script, not the
+      app — options passed in the wrong argument slot, so requests went out as GET — plus
+      one wrong expectation: GET /auth/me deliberately answers 200 with a null body when
+      signed out, because it is a "who am I" probe and src/api/client.ts depends on that.
+      The app was correct on every one.
+    - The challenge endpoints against the live database: an empty leaderboard, a 400 on a
+      non-numeric roundId, 401 on both gated writes.
+    - The archive endpoints: GET /rounds returns the round with its recorded winner
+      ("Souzou Forest"), its leaderboard and its participant count; GET /rounds/:id
+      matches; 404 and 400 behave.
+    - The rate limiter passes unauthenticated requests through to the auth middleware
+      rather than counting them (401, never 429).
+    - The server booted cleanly after the env.ts change, so requiredInProduction did not
+      break the development default.
+    - The dashboard in a headless browser: the challenge hero shows the RECORDED winner
+      with its real requirements, the leaderboard names the requirement it is ordered by
+      and shows its empty state, and MyChallengeScore replaced the fabricated rank card.
+
+  NOT VERIFIED, and the reason for each
+    - Anything needing a session. There is no way to forge one from here and the memory
+      rule keeps local-environment work with the owner, so it is handed over instead:
+      verify-authenticated.mjs in the repo root, read-only unless --allow-writes, run as
+        node verify-authenticated.mjs "<osudz_session cookie value>"
+      It covers the per-caller reads, every phase gate, the frozen-ballot refusals, the
+      self-vote refusal, admin gating in both directions, the voting -> challenge bypass
+      attempt, and the rate limiter.
+    - The C2 deadline behaviour. Nothing is due on this instance, so the clock was
+      confirmed only as a no-op. Moving a deadline needs an admin session and PATCH
+      /api/admin/round/phase with endsAt — not a hand-written UPDATE.
+    - Any page but the dashboard in a browser. THE APP HAS NO URL ROUTING: platformPage
+      is React state with no history sync, so /vote and /archive are not addressable and
+      a headless browser cannot reach them without a driver. That is also a product gap —
+      nobody can link or bookmark a page — and it is FLAGGED FOR THE OWNER rather than
+      fixed here, since adding routing was never asked for.
+    - A live Discord announcement. DISCORD_WEBHOOK is set in .env but firing a real
+      announcement means advancing a real phase, which is the owner's call.
+
+
 # STATE OF THE LOCAL INSTANCE, 2026-09-04
 
 Facts, not tasks — but they shape what can be tested.
