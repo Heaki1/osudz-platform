@@ -4,6 +4,7 @@ import { ApiSubmission } from '../../api/client';
 import { CurrentRound, formatDeadline, roundLabel, useCountdown } from '../../lib/round';
 import { beatmapUrl, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
+import { WithdrawButton } from './WithdrawButton';
 import { favoriteBeatmaps, challengeScores } from './sampleData';
 import { AuthUser } from './NavHeader';
 import {
@@ -237,9 +238,11 @@ function SubmissionStatusBand({
 
 function YourSubmission({
   submission,
+  onWithdraw,
   onNavigate,
 }: {
   submission: ApiSubmission | null;
+  onWithdraw: () => Promise<string | null>;
   onNavigate: (page: PlatformPage) => void;
 }) {
   const copy = submission ? REVIEW_PRESENTATION[submission.reviewStatus] : null;
@@ -282,6 +285,7 @@ function YourSubmission({
               <LinkIcon className="w-3.5 h-3.5" />
               Open on osu!
             </a>
+            <WithdrawButton onWithdraw={onWithdraw} />
           </div>
         </div>
       ) : (
@@ -353,6 +357,8 @@ interface DashboardPageProps {
   maps: Beatmap[];
   /** The signed-in user's own entry, whatever its review status. */
   mySubmission: ApiSubmission | null;
+  /** Resolves to an error message, or null once the entry is withdrawn. */
+  onWithdraw: () => Promise<string | null>;
   /** Submission id the caller voted for in the open round, or null. Server-held. */
   myVote: number | null;
   /** Beatmap id whose cast or retract is in flight. */
@@ -384,6 +390,7 @@ export function DashboardPage({
   round,
   maps,
   mySubmission,
+  onWithdraw,
   myVote,
   voteBusy,
   voteError,
@@ -447,7 +454,13 @@ export function DashboardPage({
 
           <SubmissionStatusBand round={round} approvedCount={maps.length} countdown={countdown} />
 
-          {user && <YourSubmission submission={mySubmission} onNavigate={onNavigate} />}
+          {user && (
+            <YourSubmission
+              submission={mySubmission}
+              onWithdraw={onWithdraw}
+              onNavigate={onNavigate}
+            />
+          )}
 
           {/* Submit CTA — dropped once there is an entry to show above. */}
           {!mySubmission && (

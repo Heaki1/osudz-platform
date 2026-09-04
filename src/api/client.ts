@@ -170,6 +170,8 @@ export const api = {
     mine: () => get<ApiSubmission | null>("/submissions/mine"),
     /** Resolves a pasted osu! URL to beatmap metadata for the preview card. */
     lookup: (url: string) => send<ApiBeatmapPreview>("POST", "/submissions/lookup", { url }),
+    /** Withdraws the caller's entry. Submission phase only, server-enforced. */
+    withdraw: () => send<{ ok: boolean }>("DELETE", "/submissions/mine"),
     submit: (body: {
       difficultyId: number;
       modRequirement: string;

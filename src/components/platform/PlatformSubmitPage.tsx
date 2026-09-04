@@ -7,6 +7,7 @@ import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';
 import { PhaseGate } from './PhaseGate';
+import { WithdrawButton } from './WithdrawButton';
 import {
   Upload, Star, Clock, CheckCircle2,
   Link, Heart, ChevronRight, X, AlertCircle, LogIn,
@@ -384,7 +385,13 @@ function LoginGate({ onLogin }: { onLogin?: () => void }) {
 type SubmitTab = 'url' | 'favorites';
 
 /** One submission per user per round, so once there is one there is nothing to add. */
-function MySubmission({ submission }: { submission: ApiSubmission }) {
+function MySubmission({
+  submission,
+  onWithdraw,
+}: {
+  submission: ApiSubmission;
+  onWithdraw: () => Promise<string | null>;
+}) {
   const copy = REVIEW_PRESENTATION[submission.reviewStatus];
 
   return (
@@ -420,6 +427,8 @@ function MySubmission({ submission }: { submission: ApiSubmission }) {
           Open on osu!
         </a>
       </div>
+
+      <WithdrawButton onWithdraw={onWithdraw} />
     </div>
   );
 }
@@ -430,6 +439,8 @@ interface PlatformSubmitPageProps {
   mySubmission: ApiSubmission | null;
   loading: boolean;
   onSubmitted: (submission: ApiSubmission) => void;
+  /** Resolves to an error message, or null once the entry is withdrawn. */
+  onWithdraw: () => Promise<string | null>;
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
@@ -440,6 +451,7 @@ export function PlatformSubmitPage({
   mySubmission,
   loading,
   onSubmitted,
+  onWithdraw,
   onNavigate,
   user,
   onLogin,
@@ -469,7 +481,7 @@ export function PlatformSubmitPage({
           <span className="text-sm">Checking your submission…</span>
         </div>
       ) : mySubmission ? (
-        <MySubmission submission={mySubmission} />
+        <MySubmission submission={mySubmission} onWithdraw={onWithdraw} />
       ) : (
         <>
           <EligibilityPanel />

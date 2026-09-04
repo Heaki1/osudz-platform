@@ -44,10 +44,10 @@ export const beatmapUrl = (submission: ApiSubmission): string =>
  * How a review state is presented. Lives here rather than in a page because the
  * dashboard and the submit page both show it, and two copies would drift.
  *
- * 'rejected' reads as "Changes Requested" by request. Note what that cannot yet
- * promise: one submission per user per round, and no endpoint to delete or
- * replace one, so a submitter cannot act on it alone — hence the blurb pointing
- * at an administrator rather than at the submit form.
+ * 'rejected' reads as "Changes Requested" by request, and its blurb now points at
+ * the submit form rather than at an administrator: DELETE /api/submissions/mine
+ * means a submitter can withdraw and re-enter on their own, as long as the round is
+ * still in its submission phase.
  */
 export const REVIEW_PRESENTATION: Record<
   ApiSubmission['reviewStatus'],
@@ -66,7 +66,7 @@ export const REVIEW_PRESENTATION: Record<
   rejected: {
     label: 'Changes Requested',
     tone: 'bg-rose-500/10 border-rose-500/25 text-rose-400',
-    blurb: 'An administrator asked for changes. Replacing an entry is not possible yet — ask an administrator to look at it again.',
+    blurb: 'An administrator asked for changes. Withdraw this entry and submit again while submissions are open.',
   },
 };
 

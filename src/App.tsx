@@ -154,6 +154,19 @@ export default function App() {
     setVoteBusy(null);
   };
 
+  /**
+   * Withdrawing is submission-phase only and the server enforces it. The panels own
+   * their own confirm and busy state, so this performs the write and reports the
+   * outcome rather than holding UI state for them.
+   */
+  const handleWithdraw = async (): Promise<string | null> => {
+    const result = await api.submissions.withdraw();
+    if (!result.ok) return result.error;
+    setMySubmission(null);
+    await refresh();
+    return null;
+  };
+
   const handleFavorite = (id: string) => {
     setMaps((prev) => prev.map((m) => (m.id === id ? { ...m, isFavorited: !m.isFavorited } : m)));
   };
@@ -193,6 +206,7 @@ export default function App() {
             round={round}
             maps={maps}
             mySubmission={mySubmission}
+            onWithdraw={handleWithdraw}
             myVote={myVote}
             voteBusy={voteBusy}
             voteError={voteError}
@@ -229,6 +243,7 @@ export default function App() {
             mySubmission={mySubmission}
             loading={!loaded}
             onSubmitted={setMySubmission}
+            onWithdraw={handleWithdraw}
             onNavigate={setPlatformPage}
             user={platformUser}
             onLogin={handleLogin}

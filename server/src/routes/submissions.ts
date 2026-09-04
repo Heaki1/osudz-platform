@@ -17,6 +17,7 @@ import {
   findById,
   findByUserAndRound,
   listForRound,
+  removeByUserAndRound,
   toApiSubmission,
 } from '../repo/submissions.js';
 import {
@@ -78,6 +79,43 @@ router.get('/mine', requireAuth, async (req, res) => {
     res.json(row ? toApiSubmission(row) : null);
   } catch (err) {
     fail(res, err, 'mine');
+  }
+});
+
+// DELETE /api/submissions/mine — withdraw the caller's entry.
+//
+// Submission phase only. Past it the entry is in the ballot, and
+// votes.submission_id cascades, so withdrawing would delete votes cast for it and
+// move every other entry's standing.
+router.delete('/mine', requireEligible, async (req, res) => {
+  try {
+    const round = await findCurrent();
+    if (!round) {
+      res.status(409).json({ error: 'No round is open' });
+      return;
+    }
+    if (round.phase !== 'submission') {
+      res.status(409).json({
+        error: 'Submissions are closed — this round is in the ' + round.phase + ' phase',
+      });
+      return;
+    }
+
+    // requireEligible guarantees req.user, but the type does not know that.
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const removed = await removeByUserAndRound(user.id, round.id);
+    if (!removed) {
+      res.status(404).json({ error: 'You have no submission in this round' });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'withdraw');
   }
 });
 

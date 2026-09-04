@@ -84,6 +84,20 @@ export async function findById(id: number): Promise<SubmissionRow | null> {
   return rows[0] ?? null;
 }
 
+/**
+ * Withdraws the caller's entry. Only ever reached during the submission phase, and
+ * that gate is what makes it safe: votes.submission_id is ON DELETE CASCADE, so
+ * deleting an entry that had votes would take the votes with it and shift every
+ * tally. No vote can exist before the voting phase.
+ */
+export async function removeByUserAndRound(userId: number, roundId: number): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `DELETE FROM submissions WHERE user_id = $1 AND round_id = $2`,
+    [userId, roundId]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 /** Enforced in the database too, by submissions_one_per_user_per_round. */
 export async function findByUserAndRound(
   userId: number,

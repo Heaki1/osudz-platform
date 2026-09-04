@@ -64,26 +64,21 @@ fix it as its own item with its own commit.
   A2  Dashboard shows the caller's own entry and its review state        [DONE]
       Landed in e301e80, sharing REVIEW_PRESENTATION with the submit page.
 
-  A3  Let a submitter withdraw their entry                               [TODO]
-      WHAT   DELETE /api/submissions/mine — requireEligible, submission phase
-             only, deletes the caller's row in the open round. A withdraw button
-             on the submit page's MySubmission panel and on the dashboard's
-             YourSubmission panel.
-      WHY    src/lib/submission.ts REVIEW_PRESENTATION tells a rejected
-             submitter to ask an administrator, because one entry per player per
-             round plus no delete endpoint means they cannot act alone.
-      DEPS   none
-      VERIFY curl DELETE unauthenticated -> 401; as the owner in the voting
-             phase -> 409; in the submission phase -> 200 and the row is gone;
-             GET /api/submissions/mine then answers null.
-      STEPS  1 INSPECT   server/src/routes/submissions.ts, server/src/repo/
-                         submissions.ts, src/components/platform/
-                         PlatformSubmitPage.tsx
-             2 IMPLEMENT repo remove(), route, both buttons
-             3 TEST      the four curls above, both typechecks, build
-             4 DIFF      git status --short; git diff — those files only
-             5 COMMIT    "feat: let a submitter withdraw their entry"
-             6 VERIFY    git log -1 --stat; git status --short clean
+  A3  Let a submitter withdraw their entry                               [DONE]
+      DELETE /api/submissions/mine behind requireEligible, refused outside the
+      submission phase — that gate is load-bearing, because votes.submission_id
+      cascades and withdrawing a voted-on entry would delete the votes with it.
+      repo removeByUserAndRound reports whether a row went, so withdrawing nothing
+      answers 404 rather than a cheerful 200.
+      A shared WithdrawButton (src/components/platform/WithdrawButton.tsx) sits on
+      both the submit page's MySubmission panel and the dashboard's YourSubmission
+      panel, and confirms before acting: the row is gone for good and re-entering
+      means picking the beatmap and requirements again.
+      REVIEW_PRESENTATION's rejected blurb changed with it — it used to tell a
+      rejected submitter to ask an administrator precisely because they could not
+      act alone, which is no longer true.
+      STILL TO VERIFY over HTTP in the final pass: 401 signed out, 409 outside the
+      submission phase, 200 then GET /mine answering null.
 
   A4  Persist osu!DZ community favorites                                 [TODO]
       DECIDED  There are TWO favorite sources and they must not be conflated:
