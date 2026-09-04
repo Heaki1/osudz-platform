@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import authRouter from './routes/auth.js';
 import roundsRouter from './routes/rounds.js';
@@ -20,6 +21,47 @@ app.use('/api/rounds', roundsRouter);
 app.use('/api/submissions', submissionsRouter);
 app.use('/api/votes', votesRouter);
 app.use('/api/admin', adminRouter);
+
+// ── Fallbacks ────────────────────────────────────────────────────────────────
+//
+// Every route in this server answers { error: string } on failure, and
+// src/api/client.ts's send() reads exactly that shape. Without these two the
+// contract had holes at both ends: an unknown path fell through to Express's HTML
+// 404, and a malformed JSON body was rejected by express.json() before any handler
+// ran, so that came back as HTML too. The client then reported "Request failed
+// (400)" with no idea why.
+
+app.use((req: Request, res: Response) => {
+  res.status(404).json({ error: `No API route for ${req.method} ${req.path}` });
+});
+
+// Four arguments, or Express treats this as ordinary middleware and never calls it.
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const { type, status, statusCode } = err as {
+    type?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+  };
+
+  // express.json() labels its own refusals; everything else here is unexpected.
+  if (type === 'entity.parse.failed') {
+    res.status(400).json({ error: 'Request body is not valid JSON' });
+    return;
+  }
+  if (type === 'entity.too.large') {
+    res.status(413).json({ error: 'Request body is too large' });
+    return;
+  }
+
+  const known = typeof status === 'number' ? status : typeof statusCode === 'number' ? statusCode : 0;
+  if (known >= 400 && known < 500) {
+    res.status(known).json({ error: 'Request could not be read' });
+    return;
+  }
+
+  console.error('[api] unhandled error:', err instanceof Error ? err.stack ?? err.message : err);
+  res.status(500).json({ error: 'Something went wrong. Try again.' });
+});
 
 app.listen(PORT, () => {
   console.log(`osudz API listening on http://localhost:${PORT}`);

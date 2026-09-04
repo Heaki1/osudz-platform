@@ -856,23 +856,14 @@ fix it as its own item with its own commit.
              5 COMMIT    nothing to commit
              6 VERIFY    confirm .env was not staged
 
-  G2  Error-handling middleware and a 404 catch-all                      [TODO]
-      WHAT   An Express error handler plus a terminal 404 in
-             server/src/index.ts, both answering the {error: string} shape every
-             route already uses.
-      WHY    index.ts ends at the last router, so an unknown /api path and a
-             body-parser failure both escape the {error} contract the client's
-             send() parses — a malformed JSON body becomes an HTML error page
-             before any handler runs.
-      DEPS   none
-      VERIFY curl an unknown /api path -> 404 {"error":...}; POST /api/votes with
-             a malformed body -> 400 {"error":...} rather than HTML.
-      STEPS  1 INSPECT   server/src/index.ts, src/api/client.ts send()
-             2 IMPLEMENT the two handlers, after all routers
-             3 TEST      the two curls above, both typechecks, build
-             4 DIFF      git status --short; git diff
-             5 COMMIT    "fix: keep every API response inside the error contract"
-             6 VERIFY    git log -1 --stat; git status --short clean
+  G2  Error-handling middleware and a 404 catch-all                      [DONE]
+      A terminal JSON 404 and a four-argument error handler at the end of
+      server/src/index.ts. express.json()'s own refusals are named — parse failure
+      is 400 "Request body is not valid JSON", oversize is 413 — any other 4xx
+      thrown by middleware keeps its status, and anything unexpected logs its stack
+      and answers 500. Verified over HTTP: unknown path and unknown method both 404
+      as JSON, a malformed body 400s as JSON instead of HTML, and valid requests
+      still reach their guards and answer 401.
 
   G3  Rate-limit the write endpoints                                     [TODO]
       WHAT   A per-account limiter on POST /api/submissions/lookup, POST
