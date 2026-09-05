@@ -152,3 +152,59 @@ export function toApiFavorite(row: FavoriteRow) {
     favoritedAt: row.created_at.toISOString(),
   };
 }
+
+/**
+ * Replaces the caller's whole 'osu' set with what their osu! profile currently holds.
+ *
+ * A MIRROR, NOT AN APPEND, and only of source 'osu'. That source means "what is on your osu!
+ * profile", so a map the player has since unfavourited there has to leave here too, or the
+ * grid would accumulate rows nothing will ever clear. Source 'dz' is never touched — the A4
+ * decision is that the two sets are never conflated, and the delete is scoped to prove it.
+ *
+ * One transaction, because a half-applied mirror is a list that is neither the old one nor
+ * the new one. The first transaction in this file, so it takes a client with pool.connect
+ * the way repo/rounds.ts does.
+ */
+export async function replaceImported(
+  userId: number,
+  beatmaps: OsuBeatmapAnyStatus[]
+): Promise<number> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("DELETE FROM favorites WHERE user_id = $1 AND source = 'osu'", [userId]);
+
+    if (beatmaps.length > 0) {
+      // One multi-row insert rather than a query per favourite: a player with two hundred
+      // favourites would otherwise be two hundred round trips inside one transaction.
+      const values: unknown[] = [];
+      const rows = beatmaps.map((b, i) => {
+        const p = i * 14;
+        values.push(
+          userId, b.difficultyId, 'osu', b.beatmapsetId, b.title, b.artist, b.mapper,
+          b.difficultyName, b.mapStatus, b.coverUrl || null, b.previewUrl || null,
+          b.stars, b.bpm, b.lengthSeconds
+        );
+        return `($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}, $${p + 6}, $${p + 7},
+                 $${p + 8}, $${p + 9}, $${p + 10}, $${p + 11}, $${p + 12}, $${p + 13}, $${p + 14})`;
+      });
+
+      await client.query(
+        `INSERT INTO favorites (
+           user_id, difficulty_id, source, beatmapset_id, title, artist, mapper,
+           difficulty_name, map_status, cover_url, preview_url, stars, bpm, length_seconds
+         ) VALUES ${rows.join(', ')}
+         ON CONFLICT (user_id, difficulty_id, source) DO NOTHING`,
+        values
+      );
+    }
+
+    await client.query('COMMIT');
+    return beatmaps.length;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}

@@ -16,8 +16,8 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { listForUser, put, remove, toApiFavorite } from '../repo/favorites.js';
-import { BeatmapNotFound, fetchBeatmapAnyStatus } from '../services/osu.js';
+import { listForUser, put, remove, replaceImported, toApiFavorite } from '../repo/favorites.js';
+import { BeatmapNotFound, fetchBeatmapAnyStatus, fetchUserFavourites } from '../services/osu.js';
 
 const router = Router();
 
@@ -83,6 +83,39 @@ router.delete('/:difficultyId', requireAuth, favoriteLimit, async (req, res) => 
   } catch (err) {
     console.error('[favorites] remove failed:', err instanceof Error ? err.message : err);
     res.status(503).json({ error: 'Database unavailable' });
+  }
+});
+
+// POST /api/favorites/import — pull the caller's osu! favourites in as source 'osu' (A5).
+//
+// NO TOKEN STORAGE, NO SECOND AUTHORIZE HOP. A player's favourite beatmapsets are public
+// profile data, so the application's own token reads them — probed against the live API
+// before this was built (docs/todo.txt A5). The osu! account comes from users.osu_id, which
+// the session already carries, so the body is empty on purpose: there is nothing for a
+// caller to assert about whose favourites to import.
+//
+// A MIRROR of the osu! profile, scoped to source 'osu'. Community favorites are never
+// touched, which is the A4 decision, and pressing the button twice is idempotent rather
+// than doubling the list — both of which A5's VERIFY asks for.
+
+/** Several osu! requests per call at 100 sets a page, so it is limited like score imports. */
+const importLimit = rateLimit({ limit: 20, windowMs: 60_000, what: 'favorite imports' });
+
+router.post('/import', requireAuth, importLimit, async (req, res) => {
+  const user = req.user!;
+
+  try {
+    const favourites = await fetchUserFavourites(Number(user.osu_id));
+    const imported = await replaceImported(user.id, favourites);
+    const rows = await listForUser(user.id);
+    res.json({ ok: true, imported, favorites: rows.map(toApiFavorite) });
+  } catch (err) {
+    if (err instanceof BeatmapNotFound) {
+      res.status(404).json({ error: 'osu! no longer has a profile for this account' });
+      return;
+    }
+    console.error('[favorites] import failed:', err instanceof Error ? err.message : err);
+    res.status(503).json({ error: 'Could not reach osu! to read your favourites. Try again shortly.' });
   }
 });
 

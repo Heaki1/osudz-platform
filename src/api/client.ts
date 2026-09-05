@@ -437,6 +437,16 @@ export const api = {
     /** Removes it across BOTH sources — the heart means "not in my favorites here". */
     remove: (difficultyId: number) =>
       send<{ ok: boolean; removed: number }>("DELETE", `/favorites/${difficultyId}`),
+    /**
+     * Pulls the caller's osu! profile favourites in as source 'osu'. The body is empty: the
+     * account comes from the session, and the server reads the list with its own token, so
+     * there is nothing for a caller to assert.
+     *
+     * A MIRROR of that half — community favorites are untouched, and pressing it twice does
+     * not double the list.
+     */
+    import: () =>
+      send<{ ok: boolean; imported: number; favorites: ApiFavorite[] }>("POST", "/favorites/import"),
   },
 
   // ── Admin ──────────────────────────────────────────────────────────────────

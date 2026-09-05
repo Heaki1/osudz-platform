@@ -527,3 +527,109 @@ function toSearchHit(raw: unknown, status: SearchStatus): OsuSearchHit | null {
     difficultyCount: Array.isArray(set.beatmaps) ? set.beatmaps.length : 1,
   };
 }
+
+// ── The player's own osu! favourites (client-credentials) ────────────────────
+//
+// docs/todo.txt A5. A player's favourite beatmapsets are PUBLIC PROFILE DATA — probed
+// against the live API before this was written — so the application token reads them and
+// nothing per-user is stored. That is why this project has no token store: neither this nor
+// the challenge score import needs one.
+//
+// ONE DIFFICULTY PER SET, the hardest rated one, through the same pickDifficulty the search
+// page uses. osu! favourites are sets, and a set with twelve difficulties would otherwise
+// become twelve near-identical favorites. A player who wants a specific difficulty can
+// favorite it directly, which is what the heart on a card does.
+
+/** Enough pages that a real player's whole list arrives; a bound so a loop cannot run away. */
+const FAVOURITES_PAGE = 100;
+const FAVOURITES_MAX_PAGES = 5;
+
+/**
+ * The caller's favourite beatmapsets, flattened to one difficulty each.
+ *
+ * A set that cannot be flattened is skipped rather than failing the import: one odd entry
+ * in a list of two hundred should not cost the player the other hundred and ninety-nine.
+ */
+export async function fetchUserFavourites(osuUserId: number): Promise<OsuBeatmapAnyStatus[]> {
+  const out: OsuBeatmapAnyStatus[] = [];
+
+  for (let page = 0; page < FAVOURITES_MAX_PAGES; page++) {
+    const params = new URLSearchParams({
+      limit: String(FAVOURITES_PAGE),
+      offset: String(page * FAVOURITES_PAGE),
+    });
+    const url = `${API_BASE}/users/${osuUserId}/beatmapsets/favourite?${params.toString()}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${await getAppToken()}`, Accept: 'application/json' },
+    });
+
+    if (res.status === 404) throw new BeatmapNotFound('osu! has no such user');
+    if (!res.ok) throw new Error(`osu! GET favourite beatmapsets failed: ${res.status}`);
+
+    const body = (await res.json()) as unknown;
+    if (!Array.isArray(body)) {
+      throw new Error('osu! favourite beatmapsets returned an unexpected shape');
+    }
+
+    for (const raw of body) {
+      const flattened = toFavouriteBeatmap(raw);
+      if (flattened !== null) out.push(flattened);
+    }
+
+    // A short page is the last page, so there is no need to ask for one that is empty.
+    if (body.length < FAVOURITES_PAGE) break;
+  }
+
+  return out;
+}
+
+/**
+ * Flattens one favourite beatmapset into the same shape fetchBeatmapAnyStatus returns, so an
+ * imported row goes through exactly the same repo path as a hand-favorited one. Returns null
+ * when the set is missing anything a row needs.
+ */
+function toFavouriteBeatmap(raw: unknown): OsuBeatmapAnyStatus | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const set = raw as Record<string, unknown>;
+
+  const difficulty = pickDifficulty(set.beatmaps);
+  if (difficulty === null) return null;
+
+  const covers = (set.covers ?? {}) as Record<string, unknown>;
+  const difficultyId = asNumber(difficulty.id);
+  const beatmapsetId = asNumber(set.id);
+  const stars = asNumber(difficulty.difficulty_rating);
+  const bpm = asNumber(difficulty.bpm) ?? asNumber(set.bpm);
+  const lengthSeconds = asNumber(difficulty.total_length);
+  const title = typeof set.title === 'string' ? set.title : '';
+  const artist = typeof set.artist === 'string' ? set.artist : '';
+  const mapper = typeof set.creator === 'string' ? set.creator : '';
+  const difficultyName = typeof difficulty.version === 'string' ? difficulty.version : '';
+
+  if (
+    difficultyId === null || beatmapsetId === null || stars === null || bpm === null ||
+    lengthSeconds === null || !title || !artist || !mapper || !difficultyName
+  ) {
+    return null;
+  }
+
+  return {
+    difficultyId,
+    beatmapsetId,
+    title,
+    artist,
+    mapper,
+    difficultyName,
+    // Whatever osu! says. A favourite is very often a graveyard map, and that is not an error.
+    mapStatus: typeof set.status === 'string' ? set.status : '',
+    coverUrl: typeof covers.cover === 'string' ? covers.cover : '',
+    previewUrl: typeof set.preview_url === 'string' ? set.preview_url : '',
+    stars: Math.round(stars * 100) / 100,
+    bpm: Math.round(bpm),
+    lengthSeconds: Math.round(lengthSeconds),
+    cs: asNumber(difficulty.cs),
+    ar: asNumber(difficulty.ar),
+    od: asNumber(difficulty.accuracy),
+    hp: asNumber(difficulty.drain),
+  };
+}

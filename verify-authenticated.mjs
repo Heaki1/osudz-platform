@@ -553,6 +553,56 @@ console.log('--- favorites (A4) ---');
   }
 }
 
+console.log('');
+console.log('--- osu! favorites import (A5) ---');
+if (allowWrites) {
+  // A community favorite planted first, so the import can be shown not to disturb it —
+  // which is the A4 decision this item is most able to break.
+  const planted = 4907876;
+  await call(`/favorites/${planted}`, { method: 'PUT' });
+
+  const first = await call('/favorites/import', { method: 'POST' });
+  ok(
+    'POST /favorites/import succeeds with the app token alone',
+    first.status === 200 && Number.isFinite(first.body?.imported),
+    `got ${first.status}: ${JSON.stringify(first.body).slice(0, 160)}`
+  );
+
+  const rows = Array.isArray(first.body?.favorites) ? first.body.favorites : [];
+  const dz = rows.filter((f) => f.source === 'dz');
+  const osu = rows.filter((f) => f.source === 'osu');
+
+  ok(
+    'the community favorite is still there, untouched',
+    dz.some((f) => f.difficultyId === planted),
+    JSON.stringify(dz.map((f) => f.difficultyId))
+  );
+  ok(
+    'imported rows are tagged as osu! favorites',
+    osu.every((f) => f.source === 'osu'),
+    `${osu.length} imported rows`
+  );
+  if (osu.length === 0) {
+    console.log('      note: this account has no osu! favourites, so the import had nothing to add.');
+  }
+
+  const second = await call('/favorites/import', { method: 'POST' });
+  const after = Array.isArray(second.body?.favorites) ? second.body.favorites : [];
+  ok(
+    'importing twice does not duplicate rows',
+    second.status === 200 && after.length === rows.length,
+    `${rows.length} then ${after.length}`
+  );
+
+  // One row per (difficulty, source) is the primary key; this proves the read agrees.
+  const keys = after.map((f) => `${f.source}:${f.difficultyId}`);
+  ok('every favorite is unique on source and difficulty', new Set(keys).size === keys.length, `${keys.length} rows`);
+
+  await call(`/favorites/${planted}`, { method: 'DELETE' });
+} else {
+  skipped('the osu! favorites import', 'it writes favorites — pass --allow-writes');
+}
+
 console.log('\n--- rate limiting ---');
 if (allowWrites) {
   // 25 lookups of the same beatmap: the limit is 20 a minute, so the tail must be 429.

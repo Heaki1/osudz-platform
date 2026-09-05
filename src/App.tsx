@@ -238,6 +238,20 @@ export default function App() {
     setFavorites((await api.favorites.list()) ?? []);
   };
 
+  /**
+   * Imports the player's osu! profile favourites (A5). Resolves to an error message, or null
+   * on success, matching handleImportScore — the button that calls it needs to say what went
+   * wrong rather than quietly doing nothing.
+   *
+   * The response already carries the whole refreshed list, so this does not re-read it.
+   */
+  const handleImportFavorites = async (): Promise<string | null> => {
+    const result = await api.favorites.import();
+    if (!result.ok) return result.error;
+    setFavorites(result.data.favorites);
+    return null;
+  };
+
   return (
     <div className="min-h-full bg-[#060c18] text-slate-100">
       <NavHeader
@@ -287,6 +301,7 @@ export default function App() {
             maps={mapsWithFavorites}
             favorites={favoriteMaps}
             onFavorite={handleFavorite}
+            onImportFavorites={handleImportFavorites}
             mySubmission={mySubmission}
             onWithdraw={handleWithdraw}
             myVote={myVote}

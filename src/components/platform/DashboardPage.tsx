@@ -573,6 +573,52 @@ function SubmissionRequirements({ onNavigate }: { onNavigate: (page: PlatformPag
 
 // ── DASHBOARD PAGE ───────────────────────────────────────────────────────────
 
+/**
+ * "Load my osu! favorites" (A5).
+ *
+ * The button used to be decoration — no handler at all. It now reports what happened,
+ * because an import that finds nothing and an import that failed look identical if the
+ * button just goes quiet, and "nothing happened" was the old behaviour.
+ */
+function ImportFavoritesButton({
+  onImport,
+  disabled,
+}: {
+  onImport: () => Promise<string | null>;
+  disabled?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const run = async () => {
+    setBusy(true);
+    setMessage(null);
+    const error = await onImport();
+    setBusy(false);
+    setFailed(error !== null);
+    setMessage(error ?? 'Imported your osu! favourites.');
+  };
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy || disabled}
+        title={disabled ? 'Log in to import your osu! favourites' : undefined}
+        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-400 hover:text-white text-xs font-bold transition-all"
+      >
+        <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+        {busy ? 'Importing…' : 'Load my osu! favorites'}
+      </button>
+      {message && (
+        <p className={`text-[10px] ${failed ? 'text-rose-400/90' : 'text-slate-500'}`}>{message}</p>
+      )}
+    </div>
+  );
+}
+
 interface DashboardPageProps {
   round: CurrentRound | null;
   /** Approved submissions in the open round. Empty until an admin approves one. */
@@ -581,6 +627,8 @@ interface DashboardPageProps {
   favorites: Beatmap[];
   /** Takes the map, not its id: favoriting addresses the osu! beatmap (A4). */
   onFavorite: (map: Beatmap) => void;
+  /** Imports the osu! profile favourites (A5). Resolves to an error message, or null. */
+  onImportFavorites: () => Promise<string | null>;
   /** The signed-in user's own entry, whatever its review status. */
   mySubmission: ApiSubmission | null;
   /** Resolves to an error message, or null once the entry is withdrawn. */
@@ -625,6 +673,7 @@ export function DashboardPage({
   maps,
   favorites,
   onFavorite,
+  onImportFavorites,
   mySubmission,
   onWithdraw,
   myVote,
@@ -800,13 +849,7 @@ export function DashboardPage({
                 <p className="text-[10px] uppercase tracking-widest text-slate-600 font-mono mb-1">My Collection</p>
                 <h2 className="text-xl font-black text-white">Favorite Beatmaps</h2>
               </div>
-              <button
-                type="button"
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white text-xs font-bold transition-all"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Load my osu! favorites
-              </button>
+              <ImportFavoritesButton onImport={onImportFavorites} disabled={!user} />
             </div>
             {favorites.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-14 border border-dashed border-slate-800 rounded-2xl">
