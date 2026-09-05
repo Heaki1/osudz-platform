@@ -87,3 +87,23 @@ export function announceWinner(
       : `👑 **${label(round)}** — a winner has been approved and the challenge starts now.`
   );
 }
+
+/**
+ * A corrected result (D4).
+ *
+ * Its own message rather than reusing announceWinner: that one says "the challenge starts
+ * now", which is untrue for a correction, and a community that was already told the previous
+ * answer needs to hear that it changed and why — otherwise the wrong winner stands everywhere
+ * except the database.
+ */
+export function announceCorrection(
+  round: { round_number: number; month: string; year: number },
+  winner: { title: string; artist: string; difficulty_name: string; submitted_by_name: string } | null,
+  reason: string
+): void {
+  announce(
+    winner
+      ? `⚠️ **${label(round)}** — the recorded result has been corrected by an administrator. The winner is now **${winner.artist} - ${winner.title} [${winner.difficulty_name}]**, submitted by ${winner.submitted_by_name}. Reason: ${reason}`
+      : `⚠️ **${label(round)}** — the recorded result has been corrected by an administrator. Reason: ${reason}`
+  );
+}

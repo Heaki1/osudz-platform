@@ -686,6 +686,66 @@ console.log('--- submission rules (C8) and the requirement lists (C9) ---');
   }
 }
 
+console.log('');
+console.log('--- result correction (D4) ---');
+{
+  const history = await call('/admin/round/corrections');
+  if (history.status === 403) {
+    skipped('the correction checks', 'this session is not an administrator');
+  } else {
+    ok(
+      'GET /admin/round/corrections reads the history',
+      history.status === 200 && Array.isArray(history.body),
+      `got ${history.status}: ${JSON.stringify(history.body).slice(0, 160)}`
+    );
+
+    const badId = await call('/admin/round/correction', {
+      method: 'POST',
+      body: JSON.stringify({ submissionId: 'nope', reason: 'a long enough reason here' }),
+    });
+    ok('a non-numeric submissionId answers 400', badId.status === 400, `got ${badId.status}`);
+
+    // A correction without a reason is the silent UPDATE this item exists to replace.
+    const noReason = await call('/admin/round/correction', {
+      method: 'POST',
+      body: JSON.stringify({ submissionId: 2 }),
+    });
+    ok('a missing reason answers 400', noReason.status === 400, `got ${noReason.status}`);
+
+    const shortReason = await call('/admin/round/correction', {
+      method: 'POST',
+      body: JSON.stringify({ submissionId: 2, reason: 'oops' }),
+    });
+    ok('a one-word reason answers 400', shortReason.status === 400, `got ${shortReason.status}`);
+
+    const foreign = await call('/admin/round/correction', {
+      method: 'POST',
+      body: JSON.stringify({ submissionId: 999999, reason: 'not an entry in this round at all' }),
+    });
+    ok(
+      'an entry that is not in this round answers 409',
+      foreign.status === 409,
+      `got ${foreign.status}: ${JSON.stringify(foreign.body)}`
+    );
+
+    // The live instance has exactly one approved entry, which IS the recorded winner, so
+    // correcting to it must be refused as a no-op rather than writing an empty audit row.
+    const unchanged = await call('/admin/round/correction', {
+      method: 'POST',
+      body: JSON.stringify({ submissionId: 2, reason: 'the entry that already holds it' }),
+    });
+    ok(
+      'correcting to the entry that already won answers 409',
+      unchanged.status === 409,
+      `got ${unchanged.status}: ${JSON.stringify(unchanged.body)}`
+    );
+    console.log(
+      '      note: a real correction needs a second entry in the round, so the success path'
+    );
+    console.log('      stays unexercised here for the same reason H6 is blocked.');
+  }
+}
+
 console.log('\n--- rate limiting ---');
 if (allowWrites) {
   // 25 lookups of the same beatmap: the limit is 20 a minute, so the tail must be 429.

@@ -13,6 +13,8 @@ import { env } from '../env.js';
 import {
   approveWinner,
   canTransition,
+  correctWinner,
+  listCorrections,
   closeVoting,
   create,
   findCurrent,
@@ -58,6 +60,7 @@ import {
 } from '../repo/allowedCountries.js';
 import {
   announceBallotClosed,
+  announceCorrection,
   announcePhase,
   announceWinner,
   isConfigured,
@@ -870,6 +873,112 @@ router.get('/config', (_req, res) => {
   });
 });
 
+// ── Result correction (D4) ───────────────────────────────────────────────────
+//
+// The only path that changes a recorded winner. A reason is REQUIRED: D4 exists so that a
+// correction is explicit and visible rather than a silent UPDATE, and an unexplained
+// correction is the silent case wearing a timestamp.
+
+/** Why a correction was refused, in words an administrator can act on. */
+const CORRECTION_REFUSALS: Record<'no-result' | 'not-in-round' | 'unchanged', string> = {
+  'no-result':
+    'This round has no recorded winner to correct. Close the ballot first, or resolve the tie through the winner approval.',
+  'not-in-round': 'That submission is not an entry in this round',
+  unchanged: 'That entry is already the recorded winner',
+};
+
+router.get('/round/corrections', async (req, res) => {
+  // Same shape as GET /votes: no roundId means the open round, and no open round means an
+  // empty history rather than a 404 for a question that simply has no subject yet.
+  const raw = req.query.roundId;
+  let roundId: number;
+
+  if (raw === undefined) {
+    const open = await findCurrent().catch(() => null);
+    if (!open) {
+      res.json([]);
+      return;
+    }
+    roundId = open.id;
+  } else if (typeof raw === 'string' && /^\d+$/.test(raw)) {
+    roundId = Number(raw);
+  } else {
+    res.status(400).json({ error: 'roundId must be a positive integer' });
+    return;
+  }
+
+  try {
+    const rows = await listCorrections(roundId);
+    res.json(
+      rows.map((row) => ({
+        id: row.id,
+        roundId: row.round_id,
+        previousSubmissionId: row.previous_submission_id,
+        previousTitle: row.previous_title,
+        newSubmissionId: row.new_submission_id,
+        newTitle: row.new_title,
+        previousWinnerStatus: row.previous_winner_status,
+        reason: row.reason,
+        correctedBy: row.corrected_by,
+        correctedByName: row.corrected_by_name,
+        correctedAt: row.corrected_at.toISOString(),
+      }))
+    );
+  } catch (err) {
+    fail(res, err, 'corrections read');
+  }
+});
+
+router.post('/round/correction', async (req, res) => {
+  const { submissionId, reason } = (req.body ?? {}) as Record<string, unknown>;
+
+  const id = Number(submissionId);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: 'submissionId must be a positive integer' });
+    return;
+  }
+  if (typeof reason !== 'string' || reason.trim().length < 10) {
+    res.status(400).json({
+      error: 'A reason of at least 10 characters is required — a correction has to say why.',
+    });
+    return;
+  }
+
+  // requireAdmin guarantees req.user, but the type does not know that.
+  const admin = req.user;
+  if (!admin) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  try {
+    const round = await findCurrent();
+    if (!round) {
+      res.status(409).json({ error: 'No round is open' });
+      return;
+    }
+
+    const outcome = await correctWinner(round.id, id, reason.trim(), admin.id);
+    if (!outcome.ok) {
+      res.status(409).json({ error: CORRECTION_REFUSALS[outcome.reason] });
+      return;
+    }
+
+    // Announced, because the community was already told the previous answer. A correction
+    // nobody hears about leaves the wrong winner standing everywhere but the database.
+    const entry =
+      outcome.round.winning_submission_id === null
+        ? null
+        : await findSubmission(outcome.round.winning_submission_id);
+    announceCorrection(outcome.round, entry, reason.trim());
+
+    res.json({ ok: true, round: toApiRound(outcome.round) });
+  } catch (err) {
+    fail(res, err, 'result correction');
+  }
+});
+
 export default router;
+
 
 

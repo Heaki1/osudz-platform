@@ -7,6 +7,7 @@ import {
   ApiAdminUser,
   ApiAllowedCountry,
   ApiParticipantException,
+  ApiResultCorrection,
   ApiSiteSettings,
   ApiSubmission,
   ApiVoteAudit,
@@ -375,6 +376,172 @@ function BallotModeration({ round }: { round: CurrentRound }) {
 
 // ── ROUND CONTROL ─────────────────────────────────────────────────────────────
 
+/**
+ * Correcting a recorded result (D4).
+ *
+ * Deliberately the least convenient control on this page: collapsed by default, needs a
+ * submission chosen from the round's own entries, and needs a written reason. A validly cast
+ * vote is permanent and neither a later block nor a later rejection touches it, so this is the
+ * one escape hatch — and an escape hatch that is as easy to reach as the ordinary path stops
+ * being an exception.
+ */
+function CorrectionPanel({
+  round,
+  onRoundChange,
+}: {
+  round: CurrentRound;
+  onRoundChange: () => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [entries, setEntries] = useState<ApiSubmission[] | null>(null);
+  const [history, setHistory] = useState<ApiResultCorrection[]>([]);
+  const [choice, setChoice] = useState<number | null>(null);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const [rows, corrections] = await Promise.all([
+      api.admin.submissions(round.id),
+      api.admin.corrections(round.id),
+    ]);
+    setEntries(rows ?? []);
+    setHistory(corrections ?? []);
+  }, [round.id]);
+
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
+  const submit = async () => {
+    if (choice === null) {
+      setError('Choose the entry that should be recorded as the winner.');
+      return;
+    }
+    if (reason.trim().length < 10) {
+      setError('Write at least a sentence saying why. It is stored with the correction.');
+      return;
+    }
+    setBusy(true);
+    const res = await api.admin.correctWinner(choice, reason.trim());
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError(null);
+    setReason('');
+    setChoice(null);
+    await load();
+    await onRoundChange();
+  };
+
+  return (
+    <Section
+      title="Correct the Recorded Result"
+      description="The only way a recorded winner changes. Votes are never rewritten — this records an override, with a reason, over the top of them."
+    >
+      {history.length > 0 && (
+        <div className="space-y-2">
+          {history.map((c) => (
+            <div key={c.id} className="bg-slate-900/40 border border-amber-500/20 rounded-xl px-4 py-2.5">
+              <p className="text-xs text-white">
+                {c.previousTitle ?? `#${c.previousSubmissionId}`} → {c.newTitle ?? `#${c.newSubmissionId}`}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5">{c.reason}</p>
+              <p className="text-[10px] text-slate-600 font-mono mt-0.5">
+                {c.correctedByName ?? 'an administrator'} · {formatDeadline(c.correctedAt)} · was{' '}
+                {c.previousWinnerStatus}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-xs font-bold text-slate-500 hover:text-amber-400 transition-colors"
+        >
+          Correct the result…
+        </button>
+      ) : (
+        <div className="space-y-3">
+          {error && (
+            <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+              <p className="text-xs text-rose-300/90">{error}</p>
+            </div>
+          )}
+
+          {entries === null ? (
+            <p className="text-xs text-slate-500">Loading this round's entries…</p>
+          ) : entries.length === 0 ? (
+            <p className="text-xs text-slate-500">This round has no entries to choose between.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {entries.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setChoice(s.id)}
+                  className={`w-full flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border text-left transition-all ${
+                    choice === s.id
+                      ? 'bg-amber-400/10 border-amber-400/40'
+                      : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold text-white truncate">
+                      {s.artist} - {s.title} [{s.difficultyName}]
+                    </span>
+                    <span className="block text-[10px] text-slate-600 font-mono">
+                      #{s.id} · {s.submittedByName} · {s.voteCount} vote{s.voteCount === 1 ? '' : 's'}
+                      {round.winningSubmissionId === s.id && ' · recorded winner'}
+                    </span>
+                  </span>
+                  {choice === s.id && <CheckCircle2 className="w-4 h-4 text-amber-400 flex-shrink-0" />}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Why is this being corrected? Stored with the change and shown above."
+            rows={2}
+            className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors resize-none"
+          />
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={busy}
+              className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-slate-950 text-xs font-black rounded-xl transition-all"
+            >
+              {busy ? 'Recording…' : 'Record the correction'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); setError(null); }}
+              className="text-xs font-bold text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-600">
+            The announcement goes out again, saying the result was corrected and why — the
+            community was already told the previous answer.
+          </p>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; onRoundChange: () => void | Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -563,6 +730,12 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
           </Section>
 
           {ballotClosed && <WinnerPanel round={round} onRoundChange={onRoundChange} />}
+
+          {/* Only once something is recorded: there is nothing to correct before then, and
+              closing the ballot or resolving a tie are their own paths (D4). */}
+          {round.winningSubmissionId !== null && (
+            <CorrectionPanel round={round} onRoundChange={onRoundChange} />
+          )}
 
           {round.phase !== 'submission' && <BallotModeration round={round} />}
 

@@ -343,6 +343,26 @@ export interface ApiAdminConfig {
   adminCount: number;
 }
 
+/**
+ * One administrator correction of a recorded result (D4).
+ *
+ * The only way a recorded winner ever changes. Append-only: the previous entry stays named
+ * here rather than being overwritten, so a round corrected twice keeps both steps.
+ */
+export interface ApiResultCorrection {
+  id: number;
+  roundId: number;
+  previousSubmissionId: number | null;
+  previousTitle: string | null;
+  newSubmissionId: number | null;
+  newTitle: string | null;
+  previousWinnerStatus: string;
+  reason: string;
+  correctedBy: number | null;
+  correctedByName: string | null;
+  correctedAt: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -533,6 +553,17 @@ export const api = {
         "/admin/round/winner",
         submissionId === undefined ? {} : { submissionId }
       ),
+    /** Corrections applied to a round's recorded result. Defaults to the open round. */
+    corrections: (roundId?: number) =>
+      get<ApiResultCorrection[]>(
+        roundId === undefined ? "/admin/round/corrections" : `/admin/round/corrections?roundId=${roundId}`
+      ),
+    /**
+     * Overrides the recorded winner. The reason is required and stored — D4 exists so a
+     * correction is explicit and visible rather than a silent UPDATE.
+     */
+    correctWinner: (submissionId: number, reason: string) =>
+      send<{ ok: boolean; round: ApiRound }>("POST", "/admin/round/correction", { submissionId, reason }),
     /** Read-only server configuration — what is set, never the secrets themselves. */
     config: () => get<ApiAdminConfig>("/admin/config"),
     /** The submission rules, with who last changed them. */

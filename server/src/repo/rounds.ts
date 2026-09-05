@@ -519,3 +519,131 @@ export function toApiRound(row: RoundRow) {
     winnerApprovedAt: row.winner_approved_at?.toISOString() ?? null,
   };
 }
+
+// ── Result correction (D4) ───────────────────────────────────────────────────
+//
+// THE ONLY WAY A RECORDED RESULT EVER CHANGES. A validly cast vote is counted
+// permanently, a later voter block is forward-only, and a later submission rejection does
+// not retroactively discount votes — so if a result genuinely has to be corrected, an
+// administrator does it explicitly and visibly rather than as a side effect of anything
+// else. Without this the permanence rule had no remedy but editing the database by hand.
+//
+// APPEND-ONLY AUDIT. Every correction inserts a round_result_corrections row carrying the
+// previous winner and the previous status, so the old value stays readable rather than
+// being overwritten in place, and a round corrected twice keeps both steps.
+
+export type CorrectWinnerOutcome =
+  | { ok: true; round: RoundRow }
+  | { ok: false; reason: 'no-result' | 'not-in-round' | 'unchanged' };
+
+export interface CorrectionRow {
+  id: number;
+  round_id: number;
+  previous_submission_id: number | null;
+  new_submission_id: number | null;
+  previous_winner_status: string;
+  reason: string;
+  corrected_by: number | null;
+  corrected_at: Date;
+}
+
+/**
+ * Overrides a round's recorded winner.
+ *
+ * Refuses a round with no recorded result: nothing to correct is closeVoting's business, and
+ * an unresolved tie is approveWinner's. Two paths to the same state would mean two places
+ * that have to agree about what "official" means.
+ *
+ * winner_status is left exactly as it was. A correction changes WHICH entry won, not how far
+ * through the approval the round is — moving it would let a correction quietly approve a
+ * winner nobody had approved.
+ */
+export async function correctWinner(
+  roundId: number,
+  submissionId: number,
+  reason: string,
+  adminUserId: number
+): Promise<CorrectWinnerOutcome> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: locked } = await client.query<{
+      winner_status: WinnerStatus;
+      winning_submission_id: number | null;
+    }>('SELECT winner_status, winning_submission_id FROM rounds WHERE id = $1 FOR UPDATE', [roundId]);
+
+    const current = locked[0];
+    if (!current || current.winning_submission_id === null) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'no-result' };
+    }
+    if (current.winning_submission_id === submissionId) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'unchanged' };
+    }
+
+    // The correction has to name an entry from THIS round. Without the round check the
+    // schema would happily record last month's entry as this month's winner.
+    const { rows: candidate } = await client.query(
+      'SELECT 1 FROM submissions WHERE id = $1 AND round_id = $2',
+      [submissionId, roundId]
+    );
+    if (candidate.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'not-in-round' };
+    }
+
+    // The audit row FIRST, carrying the value that is about to be replaced. Written inside
+    // the same transaction as the update, so a correction can never land without its record.
+    await client.query(
+      `INSERT INTO round_result_corrections (
+         round_id, previous_submission_id, new_submission_id, previous_winner_status,
+         reason, corrected_by
+       ) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [roundId, current.winning_submission_id, submissionId, current.winner_status, reason, adminUserId]
+    );
+
+    const { rows: updated } = await client.query<RoundRow>(
+      `UPDATE rounds
+          SET winning_submission_id = $2,
+              winner_approved_by = $3,
+              winner_approved_at = now()
+        WHERE id = $1
+        RETURNING ${COLUMNS}`,
+      [roundId, submissionId, adminUserId]
+    );
+
+    await client.query('COMMIT');
+    return { ok: true, round: updated[0] };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Every correction on a round, newest first, with the entries named. */
+export async function listCorrections(roundId: number): Promise<
+  (CorrectionRow & {
+    previous_title: string | null;
+    new_title: string | null;
+    corrected_by_name: string | null;
+  })[]
+> {
+  const { rows } = await pool.query(
+    `SELECT c.*,
+            prev.title AS previous_title,
+            next.title AS new_title,
+            u.username AS corrected_by_name
+       FROM round_result_corrections c
+       LEFT JOIN submissions prev ON prev.id = c.previous_submission_id
+       LEFT JOIN submissions next ON next.id = c.new_submission_id
+       LEFT JOIN users u          ON u.id = c.corrected_by
+      WHERE c.round_id = $1
+      ORDER BY c.corrected_at DESC, c.id DESC`,
+    [roundId]
+  );
+  return rows;
+}
