@@ -955,9 +955,10 @@ function SubmissionsTab({
 // ── ELIGIBILITY ───────────────────────────────────────────────────────────────
 //
 // The country half is C4 and real: GET/PUT/DELETE /api/admin/countries, read by the same
-// allowlist that requireEligible and ApiUser.canVote go through, so this tab and the gate
-// cannot disagree. The five hardcoded countries and the two invented exception rows that
-// used to live here are gone.
+// allowlist that requireCanSubmit, requireCanVote, requireCanChallenge and the canSubmit /
+// canVote / canChallenge flags on ApiUser all read, so this tab and the gates cannot
+// disagree. The five hardcoded countries and the two invented exception rows that used to
+// live here are gone.
 
 /**
  * Intl.DisplayNames knows every ISO 3166-1 region, so no country name is stored or
@@ -1749,6 +1750,13 @@ function UsersTab() {
         is forward-only: a vote already cast stays counted.
       </p>
 
+      <p className="text-[11px] text-slate-500">
+        Challenge is <span className="text-slate-400">derived, not set</span>: the country
+        allowlist decides unless you block or grant <em>both</em> capabilities, which is the only
+        unambiguous way to say an account does or does not take part. Blocking just one leaves
+        the challenge alone.
+      </p>
+
       {users === null ? (
         <p className="text-xs text-slate-500">Loading accounts…</p>
       ) : shown.length === 0 ? (
@@ -1760,7 +1768,7 @@ function UsersTab() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
-                {['Player', 'Country', 'Rank', 'Submit', 'Vote', 'Note', 'Sessions'].map((h) => (
+                {['Player', 'Country', 'Rank', 'Submit', 'Vote', 'Challenge', 'Note', 'Sessions'].map((h) => (
                   <th key={h} className="text-left text-[10px] uppercase tracking-wider text-slate-600 font-mono px-5 py-3">
                     {h}
                   </th>
@@ -1818,6 +1826,28 @@ function UsersTab() {
                       busy={busy === u.id}
                       onCycle={(next) => void setCapability(u, 'vote', next)}
                     />
+                  </td>
+                  {/* DERIVED, so it is shown rather than set. It answers the question
+                      the two switches beside it raise: did blocking both actually stop this
+                      account competing for the prize? The rule is canEnterChallenge in
+                      server/src/repo/users.ts. */}
+                  <td className="px-5 py-3">
+                    <span
+                      title={
+                        u.canChallenge
+                          ? 'May post a challenge score'
+                          : u.override?.canSubmit === false && u.override?.canVote === false
+                            ? 'Blocked from both submitting and voting, so blocked here too'
+                            : 'Country is not on the allowlist'
+                      }
+                      className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                        u.canChallenge
+                          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                          : 'bg-slate-800/60 border-slate-700 text-slate-500'
+                      }`}
+                    >
+                      {u.canChallenge ? 'Eligible' : 'No'}
+                    </span>
                   </td>
                   <td className="px-5 py-3 text-[11px] text-slate-500 max-w-[16rem] truncate">
                     {u.override?.note ?? ''}

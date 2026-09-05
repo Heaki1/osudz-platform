@@ -4,12 +4,12 @@
 // from the recorded winner rather than from anything the caller sends. A player cannot
 // nominate which map their score counts for.
 //
-// Reads are public: the leaderboard is the point of the phase. Writing a score needs
-// the same eligibility gate as submitting and voting — see the note on that below.
+// Reads are public: the leaderboard is the point of the phase. Writing a score is gated
+// by requireCanChallenge — see the note on POST /scores for what that rule actually is.
 
 import { Router } from 'express';
 import type { Response } from 'express';
-import { requireAuth, requireEligibleCountry } from '../middleware/auth.js';
+import { requireAuth, requireCanChallenge } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { findById as findRound, findCurrent } from '../repo/rounds.js';
 import { findById as findSubmission } from '../repo/submissions.js';
@@ -109,20 +109,26 @@ router.get('/my', requireAuth, async (req, res) => {
 // read from the osu! API with the application's own token — a play on a public beatmap
 // is public data, verified before this was built (docs/todo.txt E2).
 //
-// ELIGIBILITY, now decided: the challenge is for the same community as the rest of the
-// platform, so non-Algerian accounts read the leaderboard and comment but do not compete
-// (docs/todo.txt E2, settled 2026-09-05).
+// ELIGIBILITY: the country allowlist, plus an unambiguous per-player override.
 //
-// requireEligibleCountry, not one of the capability gates. C5 split submitting and voting
-// into two independently controlled capabilities, and neither of them is "challenge", so
-// this keeps the rule that gate enforced before the split: the country allowlist alone. A
-// CONSEQUENCE WORTH KNOWING: a per-player block does not currently reach the challenge.
-// Whether it should is flagged in docs/todo.txt C5 rather than decided here.
+// The allowlist half is the E2 decision — the challenge is for the same community as the
+// rest of the platform, so accounts outside the enabled countries read the leaderboard and
+// comment but do not compete for the prize.
+//
+// The override half closes what C5 opened. Splitting participation into submitting and
+// voting left the challenge belonging to neither, so a player an administrator had blocked
+// from BOTH could still play the winning map and win the month's prize. Blocked from both is
+// the only unambiguous way those two flags say "this account does not take part", so it now
+// refuses here too; granted both is that statement inverted, so it grants here too; and a
+// block on just one capability is left to mean only what it says. The rule is
+// canEnterChallenge in repo/users.ts, derived from the two stored flags rather than a third
+// column, and it is tested there.
+//
 // This one reaches the osu! API too, and a player refreshing after every attempt is a
 // reasonable thing to do — so the limit is generous but present.
 const importLimit = rateLimit({ limit: 20, windowMs: 60_000, what: 'score imports' });
 
-router.post('/scores', requireEligibleCountry, importLimit, async (req, res) => {
+router.post('/scores', requireCanChallenge, importLimit, async (req, res) => {
   try {
     const context = await resolveChallenge(null);
     if (!context) {

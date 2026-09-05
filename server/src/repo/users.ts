@@ -82,6 +82,40 @@ export function canParticipate(
 }
 
 /**
+ * Whether an account may compete in the CHALLENGE.
+ *
+ * The country rule decides by default, exactly as it did before C5 split submitting from
+ * voting (docs/todo.txt E2): the challenge is for the same community as the rest of the
+ * platform, so accounts outside the enabled countries read the leaderboard and comment but
+ * do not compete for the prize.
+ *
+ * AN UNAMBIGUOUS OVERRIDE DECIDES INSTEAD, in both directions. Blocked from submitting AND
+ * voting is the only way the two capabilities an administrator actually sets can say "this
+ * account does not take part", so it blocks the challenge too — an investigation that
+ * removed every other form of participation but left the player eligible to win the month's
+ * prize would be a hole, not a policy. Granted both is that statement inverted, so it grants
+ * the challenge.
+ *
+ * A PARTIAL OVERRIDE LEAVES THE CHALLENGE TO THE COUNTRY RULE. "No submitting for a month"
+ * after a troll entry says nothing about playing the winning map, and reading it as a
+ * challenge ban would invent a rule the administrator did not set.
+ *
+ * Deliberately NOT canParticipate('submit') && canParticipate('vote'), which would turn
+ * every partial block into a challenge ban. And deliberately no can_challenge column and no
+ * third Capability: the rule is DERIVED from the two that are stored, so there is nothing
+ * extra to keep in sync and no migration behind a policy that may yet be tuned.
+ */
+export function canEnterChallenge(
+  row: UserRow,
+  allowedCountries: ReadonlySet<string>,
+  override: CapabilityOverride | null
+): boolean {
+  if (override?.can_submit === false && override?.can_vote === false) return false;
+  if (override?.can_submit === true && override?.can_vote === true) return true;
+  return isEligible(row, allowedCountries);
+}
+
+/**
  * Creates the user on first login and refreshes the mutable fields on every
  * later login. Admin status is derived from ADMIN_OSU_IDS each time, so granting
  * or revoking admin is an env change plus a re-login, not a manual UPDATE.
@@ -152,6 +186,7 @@ export function toApiUser(
     isAdmin: row.is_admin,
     canVote: canParticipate('vote', row, allowedCountries, override),
     canSubmit: canParticipate('submit', row, allowedCountries, override),
+    canChallenge: canEnterChallenge(row, allowedCountries, override),
   };
 }
 
@@ -202,6 +237,7 @@ export function toApiAdminUser(row: UserWithOverrideRow, allowedCountries: Reado
     isAdmin: row.is_admin,
     canSubmit: canParticipate('submit', row, allowedCountries, row),
     canVote: canParticipate('vote', row, allowedCountries, row),
+    canChallenge: canEnterChallenge(row, allowedCountries, row),
     countryAllowed: isEligible(row, allowedCountries),
     override: hasOverride(row)
       ? {

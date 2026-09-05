@@ -8,7 +8,7 @@ import { WithdrawButton } from './WithdrawButton';
 import { AuthUser } from './NavHeader';
 import {
   Trophy, Crown, Upload, ChevronRight, RefreshCw,
-  CheckCircle2, AlertCircle, Clock, LogIn, X, Ban, Heart, Link as LinkIcon,
+  CheckCircle2, AlertCircle, Clock, LogIn, X, Ban, Heart, Info, Link as LinkIcon,
 } from 'lucide-react';
 
 // ── INLINE LOGIN NUDGE ────────────────────────────────────────────────────────
@@ -176,6 +176,24 @@ function MyChallengeScore({
             Login with osu!
           </button>
         </div>
+      ) : !score && !user.canChallenge ? (
+        /* The server would refuse the import with a 403, so the button is not offered.
+           Reading the leaderboard is still open to everybody — that is the E2 decision,
+           not a consolation. Ordered before the empty state but AFTER the score check: an
+           account blocked after posting a score still sees the score it earned. */
+        <div className="space-y-3 py-2">
+          <div className="flex items-start gap-2">
+            <Info className="w-3.5 h-3.5 text-slate-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-slate-400 leading-relaxed">
+              This account cannot compete in the challenge.
+            </p>
+          </div>
+          <p className="text-[11px] text-slate-600 leading-relaxed">
+            The challenge is limited to the community's countries, and an administrator can
+            also restrict an individual account. The leaderboard below is open to read either
+            way.
+          </p>
+        </div>
       ) : !score ? (
         <div className="space-y-4">
           <p className="text-sm text-slate-400 leading-relaxed">
@@ -244,7 +262,15 @@ function MyChallengeScore({
             </p>
           )}
 
-          <div className="mt-4">{importButton}</div>
+          {user.canChallenge ? (
+            <div className="mt-4">{importButton}</div>
+          ) : (
+            /* The row stays — it was earned and it is on the leaderboard — but refreshing
+               it is the permission this account no longer has. */
+            <p className="text-[11px] text-slate-600 mt-4 leading-relaxed">
+              This account can no longer refresh its score.
+            </p>
+          )}
           {score.osuScoreId === null && (
             <p className="text-[10px] text-slate-600 mt-2">
               Entered by an administrator rather than imported.

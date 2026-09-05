@@ -60,7 +60,15 @@ if (me.status !== 200 || me.body === null) {
 }
 const user = me.body;
 console.log(
-  `      ${user.username} (osu! id ${user.osuId}, ${user.country}) admin=${user.isAdmin} canVote=${user.canVote}`
+  `      ${user.username} (osu! id ${user.osuId}, ${user.country}) admin=${user.isAdmin}` +
+    ` canSubmit=${user.canSubmit} canVote=${user.canVote} canChallenge=${user.canChallenge}`
+);
+ok(
+  'GET /auth/me carries all three capability flags as booleans',
+  typeof user.canSubmit === 'boolean' &&
+    typeof user.canVote === 'boolean' &&
+    typeof user.canChallenge === 'boolean',
+  JSON.stringify({ canSubmit: user.canSubmit, canVote: user.canVote, canChallenge: user.canChallenge })
 );
 
 const round = (await call('/rounds/current')).body;
@@ -389,10 +397,26 @@ console.log('--- per-player permissions (C5) ---');
         (u) =>
           typeof u.canSubmit === 'boolean' &&
           typeof u.canVote === 'boolean' &&
+          typeof u.canChallenge === 'boolean' &&
           typeof u.countryAllowed === 'boolean' &&
           (u.override === null || typeof u.override === 'object')
       ),
       JSON.stringify(users[0])
+    );
+
+    // The challenge flag is DERIVED, so it can be recomputed from the same row and must
+    // agree. This is the C5 challenge rule checked against live data rather than a unit
+    // fixture: an unambiguous override decides, otherwise the country allowlist does.
+    const derive = (u) => {
+      if (u.override?.canSubmit === false && u.override?.canVote === false) return false;
+      if (u.override?.canSubmit === true && u.override?.canVote === true) return true;
+      return u.countryAllowed;
+    };
+    const disagreeing = users.filter((u) => u.canChallenge !== derive(u));
+    ok(
+      'canChallenge on every row is what the C5 challenge rule derives',
+      disagreeing.length === 0,
+      disagreeing.map((u) => `${u.username}: got ${u.canChallenge}, rule says ${derive(u)}`).join('; ')
     );
 
     const overrides = await call('/admin/participants');
@@ -443,7 +467,11 @@ console.log('--- per-player permissions (C5) ---');
       // capability and the other must be untouched. Restored at the end.
       const me = await call('/auth/me');
       const myId = me.body?.id;
-      const before = { canSubmit: me.body?.canSubmit, canVote: me.body?.canVote };
+      const before = {
+        canSubmit: me.body?.canSubmit,
+        canVote: me.body?.canVote,
+        canChallenge: me.body?.canChallenge,
+      };
 
       const blocked = await call(`/admin/participants/${myId}`, {
         method: 'PUT',
@@ -476,14 +504,60 @@ console.log('--- per-player permissions (C5) ---');
         JSON.stringify(listed.body)
       );
 
+      // ── the C5 challenge rule, end to end ────────────────────────────────────
+      //
+      // The override still says canVote:false / canSubmit:null here, which is the PARTIAL
+      // case: it must not reach the challenge.
+      const partial = await call('/auth/me');
+      ok(
+        'a block on one capability does not move canChallenge',
+        partial.body?.canChallenge === before.canChallenge,
+        `canChallenge ${partial.body?.canChallenge}, was ${before.canChallenge}`
+      );
+
+      await call(`/admin/participants/${myId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ canSubmit: false, canVote: false, note: 'verify-authenticated.mjs' }),
+      });
+      const fully = await call('/auth/me');
+      ok(
+        'blocking BOTH capabilities takes canChallenge false',
+        fully.body?.canChallenge === false,
+        `canChallenge ${fully.body?.canChallenge}`
+      );
+
+      // The gate, not just the flag. requireCanChallenge is middleware, so it answers
+      // before the phase check — this is a 403 in every phase, which is what makes it
+      // testable whatever the round is doing.
+      const noScore = await call('/challenge/scores', { method: 'POST' });
+      ok(
+        'POST /challenge/scores answers 403 for an account blocked from both',
+        noScore.status === 403 && /restricted this account/i.test(noScore.body?.error ?? ''),
+        `got ${noScore.status}: ${JSON.stringify(noScore.body)}`
+      );
+
+      await call(`/admin/participants/${myId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ canSubmit: true, canVote: true, note: 'verify-authenticated.mjs' }),
+      });
+      const granted = await call('/auth/me');
+      ok(
+        'granting BOTH takes canChallenge true, whatever the country says',
+        granted.body?.canChallenge === true,
+        `canChallenge ${granted.body?.canChallenge}`
+      );
+
       const cleared = await call(`/admin/participants/${myId}`, { method: 'DELETE' });
       ok('clearing the override succeeds', cleared.status === 200, `got ${cleared.status}`);
 
       const restored = await call('/auth/me');
       ok(
         'clearing it hands the account back to the country rule',
-        restored.body?.canVote === before.canVote && restored.body?.canSubmit === before.canSubmit,
-        `canVote ${restored.body?.canVote} (was ${before.canVote})`
+        restored.body?.canVote === before.canVote &&
+          restored.body?.canSubmit === before.canSubmit &&
+          restored.body?.canChallenge === before.canChallenge,
+        `canVote ${restored.body?.canVote} (was ${before.canVote}),` +
+          ` canChallenge ${restored.body?.canChallenge} (was ${before.canChallenge})`
       );
     } else {
       skipped('the block/restore round trip', 'it writes an override on your own account — pass --allow-writes');

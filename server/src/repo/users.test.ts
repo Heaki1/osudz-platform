@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isCountryCode, normalise } from './allowedCountries.js';
-import { canParticipate, isEligible, type UserRow } from './users.js';
+import { canEnterChallenge, canParticipate, isEligible, type UserRow } from './users.js';
 
 const user = (country: string): UserRow => ({
   id: 1,
@@ -120,5 +120,53 @@ describe('canParticipate', () => {
   it('honours false rather than reading it as unset', () => {
     expect(canParticipate('submit', dz(), enabled, { can_submit: false, can_vote: false })).toBe(false);
     expect(canParticipate('vote', dz(), enabled, { can_submit: false, can_vote: false })).toBe(false);
+  });
+});
+
+// C5's loose end, closed: the challenge belonged to neither capability, so a player blocked
+// from both could still play the winning map and win the month's prize.
+describe('canEnterChallenge', () => {
+  const dz = () => user('DZ');
+  const fr = () => user('FR');
+  const enabled = allowlist('DZ');
+
+  it('falls back to the country rule when there is no override', () => {
+    expect(canEnterChallenge(dz(), enabled, null)).toBe(true);
+    expect(canEnterChallenge(fr(), enabled, null)).toBe(false);
+  });
+
+  // The hole this rule exists to close.
+  it('refuses an account blocked from both submitting and voting', () => {
+    expect(canEnterChallenge(dz(), enabled, { can_submit: false, can_vote: false })).toBe(false);
+  });
+
+  // The same statement inverted. An administrator who granted a diaspora player both
+  // capabilities has said they take part, so refusing the prize would be the mirror hole.
+  it('allows an account granted both, whatever its country', () => {
+    expect(canEnterChallenge(fr(), enabled, { can_submit: true, can_vote: true })).toBe(true);
+  });
+
+  // The reason this is not canParticipate('submit') && canParticipate('vote'): a partial
+  // block says nothing about the challenge, so the country rule still decides.
+  it('leaves a partial override to the country rule', () => {
+    expect(canEnterChallenge(dz(), enabled, { can_submit: false, can_vote: null })).toBe(true);
+    expect(canEnterChallenge(dz(), enabled, { can_submit: null, can_vote: false })).toBe(true);
+    expect(canEnterChallenge(dz(), enabled, { can_submit: true, can_vote: false })).toBe(true);
+    expect(canEnterChallenge(fr(), enabled, { can_submit: null, can_vote: true })).toBe(false);
+    expect(canEnterChallenge(fr(), enabled, { can_submit: true, can_vote: null })).toBe(false);
+  });
+
+  it('treats an all-null override as no override at all', () => {
+    const empty = { can_submit: null, can_vote: null };
+    expect(canEnterChallenge(dz(), enabled, empty)).toBe(true);
+    expect(canEnterChallenge(fr(), enabled, empty)).toBe(false);
+  });
+
+  // Pausing participation has to pause the challenge too, rather than falling back to a
+  // hardcoded country the way the pre-C4 constant would have.
+  it('refuses everyone when no country is enabled and no override grants both', () => {
+    expect(canEnterChallenge(dz(), allowlist(), null)).toBe(false);
+    expect(canEnterChallenge(dz(), allowlist(), { can_submit: true, can_vote: null })).toBe(false);
+    expect(canEnterChallenge(dz(), allowlist(), { can_submit: true, can_vote: true })).toBe(true);
   });
 });

@@ -7,9 +7,9 @@ import { readSessionClaims } from '../session.js';
 import { enabledSet } from '../repo/allowedCountries.js';
 import { findForUser } from '../repo/participantPermissions.js';
 import {
+  canEnterChallenge,
   canParticipate,
   findByOsuId,
-  isEligible,
   type Capability,
   type CapabilityOverride,
   type UserRow,
@@ -70,18 +70,20 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 }
 
 /**
- * requireAuth plus the COUNTRY rule alone — no per-player override.
+ * requireAuth plus the CHALLENGE rule, resolved through canEnterChallenge.
  *
- * Used by the challenge, and only by it. The decision recorded in docs/todo.txt E2 is that
- * the challenge keeps the gate submitting and voting had before C5 split them, and that
- * gate was the country rule. So a per-player block does not currently reach the challenge.
+ * Used by the challenge, and only by it. Two rules layered, and both matter:
  *
- * FLAGGED, NOT DECIDED: whether it should. An administrator blocking somebody after an
- * investigation would plausibly expect them out of the challenge too, but C5 names two
- * capabilities and neither of them is "challenge", so inventing a third here would be
- * inventing policy. See docs/todo.txt C5.
+ *   the country allowlist    the E2 decision — the challenge is for the same community as
+ *                            the rest of the platform (docs/todo.txt E2)
+ *   an unambiguous override  an account blocked from BOTH submitting and voting is blocked
+ *                            here too, and one granted both is allowed here too (C5)
+ *
+ * A partial override does not reach the challenge: see canEnterChallenge in repo/users.ts
+ * for why, and for why this is derived from the two stored capabilities rather than being a
+ * third column.
  */
-export async function requireEligibleCountry(
+export async function requireCanChallenge(
   req: Request,
   res: Response,
   next: NextFunction
@@ -92,20 +94,35 @@ export async function requireEligibleCountry(
   });
   if (!authenticated) return; // requireAuth has already answered.
 
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
   let allowed: ReadonlySet<string>;
+  let override: CapabilityOverride | null;
   try {
-    allowed = await enabledSet();
+    [allowed, override] = await Promise.all([enabledSet(), findForUser(user.id)]);
   } catch (err) {
-    console.error('[auth] country allowlist read failed:', err instanceof Error ? err.message : err);
+    console.error('[auth] challenge eligibility read failed:', err instanceof Error ? err.message : err);
     res.status(503).json({ error: 'Database unavailable' });
     return;
   }
 
-  if (!req.user || !isEligible(req.user, allowed)) {
-    res.status(403).json({ error: countryRefusal(allowed) });
+  if (canEnterChallenge(user, allowed, override)) {
+    next();
     return;
   }
-  next();
+
+  // Same distinction requireCapability draws: a blocked account and an ineligible country
+  // call for different actions, so the refusal has to say which one applied.
+  const fullyBlocked = override?.can_submit === false && override?.can_vote === false;
+  res.status(403).json({
+    error: fullyBlocked
+      ? 'An administrator has restricted this account from taking part.'
+      : countryRefusal(allowed, 'The challenge is'),
+  });
 }
 
 /**
@@ -152,7 +169,7 @@ function requireCapability(capability: Capability) {
       error:
         blocked === false
           ? `An administrator has restricted this account from ${capability === 'submit' ? 'submitting' : 'voting'}.`
-          : countryRefusal(allowed),
+          : countryRefusal(allowed, 'Submitting and voting are'),
     });
   };
 }
@@ -161,12 +178,15 @@ function requireCapability(capability: Capability) {
  * The country refusal NAMES the countries. It used to say "Algerian osu! accounts", which
  * stops being true the moment an administrator enables a second country, and a player
  * refused without being told the rule has nothing to act on.
+ *
+ * The subject is the caller's, because the same rule refuses three different things and
+ * "Submitting and voting are limited to..." is a lie when what was refused is a score.
  */
-function countryRefusal(allowed: ReadonlySet<string>): string {
+function countryRefusal(allowed: ReadonlySet<string>, subject: string): string {
   const list = [...allowed].sort().join(', ');
   return list
-    ? `Submitting and voting are limited to these countries: ${list}`
-    : 'Submitting and voting are closed — no country is currently enabled';
+    ? `${subject} limited to these countries: ${list}`
+    : `${subject} closed — no country is currently enabled`;
 }
 
 /** The gate for entering a beatmap, and for withdrawing one. */

@@ -27,6 +27,13 @@ export interface ApiUser {
    * beatmap, and the reverse.
    */
   canSubmit: boolean;
+  /**
+   * Whether this account may post a challenge score. DERIVED from the two capabilities
+   * above rather than stored: the country rule decides unless an administrator has blocked
+   * or granted BOTH, which is the only unambiguous statement about taking part. See
+   * canEnterChallenge in server/src/repo/users.ts.
+   */
+  canChallenge: boolean;
 }
 
 export interface ApiRound {
@@ -262,6 +269,8 @@ export interface ApiAdminUser {
   isAdmin: boolean;
   canSubmit: boolean;
   canVote: boolean;
+  /** The effective challenge answer, so the tab can show that a full block reached it. */
+  canChallenge: boolean;
   countryAllowed: boolean;
   override: ApiParticipantOverride | null;
 }

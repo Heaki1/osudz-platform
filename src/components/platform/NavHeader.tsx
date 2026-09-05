@@ -18,6 +18,8 @@ export interface AuthUser {
    * the two independently (C5), so neither can be derived from the other.
    */
   canSubmit: boolean;
+  /** Mirrors ApiUser.canChallenge — whether this account may compete for the prize. */
+  canChallenge: boolean;
 }
 
 // osu! reports no global_rank for unranked or inactive accounts.
