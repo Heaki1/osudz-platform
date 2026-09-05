@@ -10,8 +10,11 @@
 # answered. What is left is two things only the owner can do, both named below. Nothing in
 # this file is waiting on a decision, and no migration is pending.
 
-  HEAD      5e11f6fcc40ca6b05fa45c1831d075077c5fd200
+  LAST CODE 5e11f6fcc40ca6b05fa45c1831d075077c5fd200
             5e11f6f "test: commit the unauthenticated API sweep as a script"
+  HEAD      the docs commit carrying this checkpoint, which cannot name its own hash.
+            `git log -1 --oneline` is the authority; expect a docs subject on top of the
+            commit above.
   BRANCH    main
   TREE      clean — nothing uncommitted, nothing stashed
   BASELINE  1bcad8e, 43 commits back
@@ -297,7 +300,7 @@
 
   From C:\Users\heaki\Desktop\newdz
 
-    git log -1 --oneline          # expect 5e11f6f
+    git log -1 --oneline          # a docs commit on top of 5e11f6f
     git status --short            # expect empty
     npm run typecheck             # client
     cd server && npm run typecheck && cd ..
