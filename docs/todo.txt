@@ -6,9 +6,15 @@
 # with no conversation history. Everything below was true at the moment it was
 # written; re-confirm the live state with the commands at the end.
 #
-# EVERY IMPLEMENTATION ITEM ON THIS ROADMAP IS NOW DONE, and every question it raised is
-# answered. What is left is two things only the owner can do, both named below. Nothing in
-# this file is waiting on a decision, and no migration is pending.
+# EVERY ITEM IN SECTIONS A-H IS CLOSED. The owner confirmed the last two on 2026-09-05 —
+# G1 (the osu! application) and H6 (the voting happy path) — so nothing in A-H is waiting on
+# code, on a decision, or on a migration.
+#
+# ONE NEW SECTION IS OPEN, AND IT IS NOT APPROVED YET: I. RANKING. The owner specified an
+# Algeria-only ranking page whose points are earned from the monthly challenges alone, and
+# asked for the formula to be proposed before anything is built. Three items, I1-I3, all
+# AWAITING APPROVAL. Do not write code for them until the owner approves the formula in
+# that section: my_plan.txt:950 says ask rather than invent, and section I is that ask.
 
   LAST CODE 0aa4c88 "feat: let an admin skip a voting phase with no ballot"
   HEAD      the docs commit carrying this checkpoint, which cannot name its own hash.
@@ -35,7 +41,8 @@
   (vitest.client.config.ts, vitest.server.config.ts) exist for exactly that reason.
 
   ────────────────────────────────────────────────────────────────────────────────
-  WHAT STILL NEEDS HEAKI. Neither is code, and neither blocks anything else.
+  WHAT STILL NEEDS HEAKI. Neither is code. The first is a standing re-run, the second is
+  a decision that blocks section I entirely.
 
   1  The authenticated half of the verification, which no session here can forge:
 
@@ -47,16 +54,19 @@
      also runs the C5 challenge rule end to end: partial block, full block, full grant,
      restore.
 
-  2  G1 — delete osu! application 66562. Operational, owner's osu! account only. See the
-     item's own entry; .env is already on OSU_CLIENT_ID=67250, so the rotation is done and
-     deleting the stale application is what remains. The leaked secret stays live until it
-     is deleted or reset.
+  2  APPROVE OR REDIRECT THE RANKING FORMULA in section I below. It is the only thing on
+     this roadmap that is not settled, and no code may be written for it first. The section
+     proposes the point formula, the cumulative structure and the page, and ends with five
+     numbered questions the owner has to answer — the largest being whether points are
+     frozen per round in a new table (which needs migration 013, so the owner applies it)
+     or recomputed at read time.
   ────────────────────────────────────────────────────────────────────────────────
 
 
-## ITEM STATUS — 49 items
+## ITEM STATUS — 52 items
 
-  45 DONE · 1 TODO · 0 IN PROGRESS · 1 BLOCKED · 1 DECIDED · 1 NOT ASKED
+  47 DONE · 0 TODO · 0 IN PROGRESS · 0 BLOCKED · 1 DECIDED · 1 NOT ASKED
+  · 3 AWAITING APPROVAL
 
   A. SUBMISSION      A1-A5 DONE
   B. VOTING          B1-B12 DONE
@@ -64,8 +74,9 @@
   D. WINNER          D1 DECIDED (implemented by D2 and D3)   D2-D4 DONE
   E. CHALLENGE       E1-E4 DONE
   F. ARCHIVE         F1 DONE   F2 DONE
-  G. OAUTH/SECURITY  G1 TODO (operational, owner's osu! account only)   G2-G6 DONE
-  H. TESTING/CLEANUP H1-H5 DONE   H6 BLOCKED (needs a second Algerian account)
+  G. OAUTH/SECURITY  G1-G6 DONE
+  H. TESTING/CLEANUP H1-H6 DONE
+  I. RANKING         I1-I3 AWAITING APPROVAL — proposed, not built, not decided
 
   Each item's own entry below carries its full WHAT / WHY / DEPS / VERIFY, what
   landed, and every decision recorded against it. This table is only the index.
@@ -218,22 +229,21 @@
 
 ## KNOWN ISSUES AND WHAT NEEDS THE OWNER
 
-  NEEDS THE OWNER'S MACHINE OR ACCOUNT
-    1  G1: delete osu! application 66562. An EXTERNAL, ACCOUNT-ONLY task — nothing in this
-       repository can do it and no code depends on it. Less urgent than it reads: server/.env
-       is already on OSU_CLIENT_ID=67250 and that application authenticates fine, so the
-       rotation is done and deleting the stale app is what remains. Until it is deleted or
-       its secret reset, the leaked secret stays live.
+  NEEDS THE OWNER
+    1  APPROVE OR REDIRECT SECTION I. The ranking page is specified but its formula is not
+       agreed, and five numbered questions at the end of that section are waiting. This is the
+       only thing on the roadmap that blocks work, and it blocks all three of I1-I3.
     2  node verify-authenticated.mjs, at the top of this file. The only part of the
-       verification a session here cannot reach.
-       (Migration 012 was item 3 here. It is applied — 2026-09-05 — so it is gone.)
+       verification a session here cannot reach. A standing re-run, not an open task.
+       (Migration 012 was item 3 here, and G1 was item 1. Both closed 2026-09-05 — G1 on the
+       owner's confirmation, since no code here can read an osu! account settings page.)
 
   NOT VERIFIED, and the reason for each
     3  Every authenticated path. No way to forge a session here, which is why
        verify-authenticated.mjs exists and why it has grown to ten sections.
     4  D4's success path. Correcting a result needs a SECOND entry in the round to correct
-       it to, and this instance has only one — the same gap that keeps H6 blocked. Every
-       refusal is covered.
+       it to, and this instance had only one when that was last checked. Every refusal is
+       covered. (H6 used to be named here as the same gap; the owner closed it 2026-09-05.)
     5  The C2 deadline behaviour. Nothing is due on this instance, so the clock is
        confirmed only as a no-op. Moving a deadline needs an admin session and PATCH
        /api/admin/round/phase with endsAt — NOT a hand-written UPDATE.
@@ -244,7 +254,7 @@
        fixed, since routing was never asked for. It is now the largest thing on this list.
        WHAT WAS CONFIRMED of the browser surface: the dev server serves the shell on :8443
        with #root and /src/main.tsx, and it proxies /api to :3001 so the session cookie is
-       same-origin. verify-public.mjs run against http://localhost:8443/api passes all 63
+       same-origin. verify-public.mjs run against http://localhost:8443/api passes all 64
        checks, so the proxy does not alter the contract. Clicking through phases, voting and
        commenting still needs a signed-in browser.
     7  A live Discord announcement. DISCORD_WEBHOOK is set, but firing one means advancing
@@ -267,7 +277,9 @@
        placeholder env values, because services/osu.ts imports env.ts, which validates at
        module load and exits the process on a missing variable.
    14  AN APPLIED MIGRATION MUST NEVER BE EDITED. The runner checksums it and treats a
-       change as a hard failure. Anything found wrong in 001-012 becomes 013.
+       change as a hard failure. Anything found wrong in 001-012 becomes a NEW numbered file —
+       note that I1 claims 013_ranking_points.sql if section I is approved, so check the
+       directory for the next free number rather than assuming 013.
        .gitattributes pins *.sql to LF so a fresh clone cannot trip that over line endings.
    15  Long shell heredocs get truncated by this harness somewhere past roughly a hundred
        lines, producing an "unexpected EOF" that looks like a quoting bug and is not. Write
@@ -1742,7 +1754,14 @@ fix it as its own item with its own commit.
 
 # G. OAUTH / SECURITY
 
-  G1  Delete or reset osu! application 66562                             [TODO]
+  G1  Delete or reset osu! application 66562                             [DONE]
+      CLOSED 2026-09-05 — the owner confirmed this is done. Recorded on the owner's word,
+      not verified from here: application 66562 lives in an osu! account settings page that
+      no code in this repository can read, so there is nothing in the tree that can prove or
+      disprove it. The rotation half was always verifiable and was verified — .env is on
+      OSU_CLIENT_ID=67250 and its app token authenticates — and the deletion half is the part
+      that needed the account. If the old secret ever turns out still live, reopen this item
+      rather than filing a new one.
       FINDING, 2026-09-04: server/.env now has OSU_CLIENT_ID=67250. The project has
       already been moved to a DIFFERENT application, and the app token minted from
       .env authenticates successfully against the osu! API. So 66562 is no longer the
@@ -2078,7 +2097,18 @@ fix it as its own item with its own commit.
              5 COMMIT    "chore: remove the last of the sample data"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  H6  Make the voting happy path testable by hand                    [BLOCKED]
+  H6  Make the voting happy path testable by hand                        [DONE]
+      CLOSED 2026-09-05 — the owner confirmed the happy path was exercised. Recorded on the
+      owner's word: casting a real vote needs a session and a second participant's approved
+      entry, and neither can be produced from here, which is what made this item blocked in
+      the first place. The two guards it was waiting on are unchanged and still enforced —
+      routes/votes.ts:123 refuses an unapproved target, :132 refuses the caller's own entry.
+      A dev-only fixture script was designed for this item and NOT built, because the block
+      cleared first; if the ballot ever needs a synthetic second participant again, the
+      design was: one reserved osu_id far outside the range osu! issues (login is
+      ON CONFLICT (osu_id) DO UPDATE, so a colliding id would bind a real person to the
+      fixture row), real beatmap metadata through the existing fetchBeatmap, and rows created
+      with repo/submissions.ts create() + review() so they cannot drift from the schema.
       WHAT   Get an approved entry into the open round from an account that is
              not the tester's own.
       WHY    Right now GET /api/submissions returns zero approved entries, and the
@@ -2091,6 +2121,232 @@ fix it as its own item with its own commit.
              administrator approving it.
       VERIFY log in, cast a vote on that entry, see the count go to 1 and the
              "Vote cast" pill appear; move the vote; retract it.
+
+
+# I. RANKING   ← SPECIFIED BY THE OWNER 2026-09-05. NOTHING HERE IS APPROVED YET.
+
+  The owner asked for an Algeria-only performance ranking page, modelled on
+  https://osu.ppy.sh/rankings/osu/global but with its own point system: points earned
+  EXCLUSIVELY by playing the monthly challenges, never imported from osu! pp or ranked-score
+  data. Challenge performance, accuracy, completion/results and difficulty/placement all
+  contribute, and the leaderboard is cumulative across challenges.
+
+  THIS LIFTS A BAN, AND THE BAN'S WORDING IS WHY IT CAN BE LIFTED. my_plan.txt:940-947
+  forbids inventing "points systems" and "ranking systems not specified by the owner". A
+  ranking the owner specifies is not the thing that was forbidden — and :950 says what to do
+  with the parts still unspecified: "leave room for extension and ask the owner rather than
+  creating a complicated feature." So every number below is a PROPOSAL carrying its reasoning,
+  and the five questions closing this section are the ask. No code until they are answered.
+
+  ── WHAT THE DATA ALREADY SUPPORTS ──────────────────────────────────────────
+
+  The formula was designed backwards from columns that already exist, so it needs no new osu!
+  API call, no new import path and no change to how a score is recorded. Per player per round:
+
+    challenge_scores   score, accuracy, misses, mods, qualified, submitted_at.
+                       ONE ROW PER USER PER ROUND (challenge_scores_one_per_user_per_round),
+                       and it already holds their best play. `qualified` is computed on insert
+                       and STORED "so past rounds keep their verdict if the rule changes"
+                       (002_challenge_scores.sql) — the precedent this whole section follows.
+    rounds             round_number, month, year, winner_status, winning_submission_id
+    submissions        the winning map's stars, mod_requirement, challenge_requirement
+    users              country_code — the Algeria filter
+
+  Nothing here reads users.global_rank, which stays display-only: DELIBERATELY ABSENT still
+  bans vote weighting by osu! rank, and importing pp is exactly what the owner ruled out.
+
+  ── THE PROPOSED FORMULA ───────────────────────────────────────────────────
+
+    RoundPoints = round( difficultyFactor × ( base + placement + accuracy + bonuses ) )
+
+  1  BASE — completion.            submitted any score at all      10
+                                    the score qualified            +25
+     `qualified` means it met the round's mod requirement and, on a Full Combo round, had no
+     misses. A non-qualifying play still earns the 10: turning up and failing the terms is
+     worth more than not turning up, and less than doing it properly.
+
+  2  PLACEMENT — 100 × (1/√r) × fieldFactor, qualified plays only.
+     Rank r comes from the round's OWN ordering, orderFor() in repo/challengeScores.ts —
+     score DESC normally, accuracy DESC on a Best Accuracy round, misses ASC on a Lowest Miss
+     Count round. Ranking by raw score everywhere would contradict the leaderboard the players
+     were shown.
+       1/√r decays gently:  1st 1.00   2nd 0.71   3rd 0.58   4th 0.50   5th 0.45   10th 0.32
+       1/r was rejected — halving the winner's points for second place is brutal in a field
+       of four, which is the field this community actually has.
+       fieldFactor = min(1, N/8), N = qualified players that round. THE SMALL-FIELD FIX, and
+       the single most important number in this proposal: winning a 3-player round scores
+       100 × 1.00 × 0.375 = 38, not 100. Without it the earliest months — when turnout is
+       lowest — mint the most points, the first few players lock the table permanently, and
+       the ranking stops measuring anything as the community grows.
+
+  3  ACCURACY — 60 × ((max(0, acc − 80) / 20)²), capped at 60.
+       80% or less 0    90% 15    95% 34    98% 49    99% 54    100% 60
+     Squared, not linear, because 90% and 99% are numerically 9 apart and nothing alike to a
+     player. Floored at 80% so a wildly failed play earns nothing here, capped at 60 so
+     accuracy cannot outrank placement.
+
+  4  BONUSES — kept small on purpose.
+       your submission won the round                                   +20
+       full combo on a round that did NOT require one                   +10
+     No points for voting, deliberately. B11 made ballot secrecy a rule; paying for votes
+     turns the ballot into currency and invites farming the one thing that has to stay clean.
+
+  5  DIFFICULTY — difficultyFactor = clamp(0.8, 1.4, 0.8 + (stars − 4) × 0.1)
+       3★ and under 0.8   4★ 1.0   5★ 1.1   6★ 1.2   8★ and over 1.4
+     The winning map's stars are identical for everyone in a round, so difficulty cannot
+     separate players WITHIN a round — it separates ROUNDS from each other, which is why it is
+     a multiplier on the whole round rather than a term in the sum. Clamped so one absurd map
+     cannot distort the table.
+
+  WORKED EXAMPLE — 5★ map, Full Combo required, 6 qualified players, you place 2nd at 97.5%
+  with no misses:
+       base       10 + 25                                   =  35
+       placement  100 × 0.707 × (6/8)                       =  53
+       accuracy   60 × ((17.5/20)²)                         =  46
+       bonuses    FC was required, so already priced in      =   0
+       subtotal                                                134
+       × 1.1 for 5★                                        =  147 points
+
+  ── THE CUMULATIVE LEADERBOARD ──────────────────────────────────────────
+
+  TotalPoints = Σ RoundPoints. A plain sum — no decay, no "best N of M".
+
+  osu! weights pp by 0.95^i because a player has thousands of plays and ancient farm scores
+  would otherwise dominate. Here there are twelve rounds a year, each unrepeatable, and the
+  thing being rewarded IS sustained monthly participation. Decay would punish exactly the
+  loyalty this page exists to show.
+
+  The cost of a plain sum: whoever joined first is permanently ahead of a newcomer who plays
+  better. The fix is not decay but a SEASON — rounds.year already exists, so a calendar-year
+  table plus an all-time table costs one WHERE clause. That is question 2 below.
+
+  ── THE ITEMS ──────────────────────────────────────────────────────────────
+
+  I1  Ranking points, computed per round and frozen        [AWAITING APPROVAL]
+      WHAT   A pure scoring module — server/src/repo/rankingPoints.ts — holding the formula
+             above as functions over their inputs, in the style of refuseSkipVoting and
+             checkBeatmapRules: roundPoints(play, context) taking the play, the field size,
+             the rank, the winning map's stars and whether the player's map won, returning the
+             integer and a breakdown of the five terms. Then migration 013_ranking_points.sql
+             storing one frozen row per user per round, written when the challenge phase ends.
+      WHY    Two reasons the points are frozen rather than recomputed on every page load.
+             First, precedent: challenge_scores.qualified is already stored for exactly this
+             reason, and D4 made result corrections an audit table rather than an in-place
+             overwrite — a ranking whose history silently rewrites itself when a constant is
+             tuned is the worst version of this feature. Second, cost: the read-time query
+             joins four tables and re-ranks every round on every request, and it gets heavier
+             every month forever.
+             The breakdown is returned, not just the total, because the page has to be able to
+             show a player WHY they have the points they have. An opaque formula in a small
+             community produces arguments, not competition.
+      DEPS   The five questions below, all of them. Q3 in particular decides whether this item
+             has a migration at all. NOTHING ELSE — challenge_scores, rounds and submissions
+             already carry every input.
+      VERIFY unit tests on the pure module: the worked example above to the point, a 1-player
+             field, a 20-player field, 100% and 79% accuracy, a non-qualifying play earning
+             the base and no placement, each of the three orderings, and the clamp at both
+             ends. Then, per round, the stored total equals the module's answer for the same
+             inputs.
+      STEPS  1 INSPECT   repo/challengeScores.ts qualifies/orderFor/listForRound,
+                         002_challenge_scores.sql, 004_round_winner.sql, repo/rounds.ts
+                         closeVoting and applyDueTransitions for where a challenge phase ends
+             2 IMPLEMENT the pure module and its tests FIRST, with no database in the loop;
+                         then the migration; then the write on challenge-phase end
+             3 TEST      npm test, both typechecks
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: score a challenge round into ranking points"
+             6 VERIFY    git log -1 --stat; git status --short clean
+      HANDOVER  Migration 013 is DDL, so the owner applies it and nobody else:
+                  cd server && pnpm run migrate:status   # expect 12 applied, 1 pending
+                  cd server && pnpm run migrate          # expect 1 of 1 applied
+                Note the checksum lock (scripts/migrate.ts:76-80): once applied the file can
+                never be edited, so anything found wrong afterwards becomes 014.
+
+  I2  The Algeria-only rankings page                      [AWAITING APPROVAL]
+      WHAT   GET /api/rankings?season=&page= — public, no session, paginated 50 to a page,
+             returning rank, user, points, rounds played, average accuracy, first places and
+             best placement. Then src/components/platform/RankingsPage.tsx laid out like
+             osu!'s rankings table, wired into NavHeader and platformPage, plus a panel
+             explaining how points are earned.
+      WHY    The archive is already public (F1), and a ranking nobody can see without logging
+             in is not a ranking. Points are the reason to compete, so the page is the feature;
+             I1 is only the arithmetic behind it.
+             The explanation panel is not decoration. Every number in this section is a knob
+             the owner may turn, and a table of totals with no visible derivation is a table
+             people will argue with rather than chase.
+      DEPS   I1. Q1 (who appears), Q2 (seasons) and Q5 (non-qualifying plays) shape the
+             query and the columns, so they are answered before this is written, not during.
+      VERIFY sweep: 200 with an array, a non-numeric page 400, and — the rule of the whole
+             item — no row whose country is outside the filter, asserted against
+             /api/admin/users. unit: the page's empty, single-player and multi-page states.
+             By hand: the totals on the page match the stored rows for the same season.
+      STEPS  1 INSPECT   routes/archive.ts and ArchivePage.tsx as the public read+page
+                         pattern, middleware/auth.ts for why this route takes no guard
+             2 IMPLEMENT the route, the client seam, the page, the nav entry
+             3 TEST      npm test, both typechecks, npm run build, node verify-public.mjs
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: an Algeria-only challenge ranking page"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  I3  Admin recompute, and the audit that goes with it    [AWAITING APPROVAL]
+      WHAT   An admin-only POST that recomputes a round's frozen points, or every round's,
+             writing what changed rather than overwriting silently. One new admin panel row.
+      WHY    Freezing is right and it has one cost: a formula the owner tunes in month five
+             applies to month five onward and leaves months one to four scored by the old
+             rule. Recompute has to exist, it has to be deliberate, and it has to leave a
+             trace — which is D4's shape exactly, and D4 is the precedent to copy rather than
+             a new pattern to invent.
+      DEPS   I1 and I2. Lowest urgency of the three: nothing is wrong without it until the
+             first time a constant changes.
+      VERIFY recomputing an unchanged round is a no-op that still records it ran; changing a
+             constant and recomputing moves the totals and the audit says by how much;
+             ordinary users get 401, non-admin sessions 403.
+      STEPS  1 INSPECT   009_round_result_corrections.sql and routes/admin.ts round/winner
+                         as the audited-admin-write pattern
+             2 IMPLEMENT the route, the audit write, the panel
+             3 TEST      npm test, both typechecks, node verify-public.mjs
+             4 DIFF      git status --short; git diff
+             5 COMMIT    "feat: recompute ranking points, with an audit row"
+             6 VERIFY    git log -1 --stat; git status --short clean
+
+  ── THE FIVE QUESTIONS. NO CODE UNTIL THESE ARE ANSWERED. ──────────────────
+
+  Q1  WHO APPEARS?  The owner said Algerian users only, no other countries. But C4 replaced
+      the hardcoded ELIGIBLE_COUNTRY = 'DZ' with the allowed_countries table precisely so the
+      rule would be configurable, and that table holds DZ alone today. Two readings:
+        (a) filter on the allowlist — one rule for competing and for ranking, so if MA is ever
+            enabled, Moroccans who played appear. Recommended: a player who was allowed to
+            compete and did compete has earned points, and a table that hides them is lying.
+        (b) hardcode 'DZ' — literally what was asked, and it means the allowlist and the
+            ranking can disagree the moment a second country is enabled.
+      RECOMMEND (a). It is DZ-only today either way, so this only decides the future.
+
+  Q2  SEASONS?  A plain cumulative sum makes the earliest joiner permanently top. rounds.year
+      exists, so a per-year table costs a WHERE clause.
+      RECOMMEND both, all-time as the default view and a year selector beside it.
+
+  Q3  FROZEN OR DERIVED?  (a) migration 013 storing one row per user per round, written when
+      the challenge phase ends — history stable, the owner applies the DDL. (b) computed at
+      read time from challenge_scores every request — no migration, always consistent with the
+      data, but tuning a constant silently rewrites every past month and the query grows
+      forever.
+      RECOMMEND (a), on the precedent of challenge_scores.qualified and D4.
+
+  Q4  WHERE DO THE CONSTANTS LIVE?  (a) code constants, changed in a commit and reviewable in
+      a diff. (b) site_settings rows, editable in the admin config tab.
+      RECOMMEND (a) for v1. Admin-editable point weights mean the leaderboard can be reshaped
+      from a settings form with no record of who reshaped it — a governance hole, not a
+      feature. C8 put beatmap RULES in site_settings because they gate submissions before the
+      fact; points describe results after it, and those are not the same kind of setting.
+
+  Q5  DO NON-QUALIFYING PLAYS SCORE?  RECOMMEND yes — the 10-point base, no placement, and
+      accuracy points as normal. Zero for a failed attempt reads as punishment for entering,
+      and `qualified` is already stored per round so the distinction is free.
+
+  ALSO UNDECIDED, and deliberately not proposed: rank movement arrows (they need a snapshot
+  table, so they are a fourth item if wanted, not a detail of I2), badges or titles, and any
+  reward attached to a ranking position — E4's bounty is the challenge prize and nothing here
+  touches it.
 
 
 # DECISIONS SETTLED 2026-09-04
@@ -2260,9 +2516,16 @@ same afternoon.
 docs/my_plan.txt:940-947 forbids inventing these. Listed so nobody adds them
 back by accident.
 
-  - points systems. A supplied screenshot shows a "Voted (+75 pts)" button; the
-    ban is newer, and the current code has no points field anywhere.
-  - ranking systems the owner did not specify
+  - points systems — LIFTED 2026-09-05, FOR SECTION I ONLY. The owner specified a point
+    system earned from the monthly challenges; see I1-I3, proposed and not yet approved.
+    What stays banned is a points system nobody asked for — and specifically the
+    "Voted (+75 pts)" button in the supplied screenshot. Section I gives votes no points at
+    all, on purpose: B11 made ballot secrecy a rule and paying for votes would make the
+    ballot the thing worth farming.
+  - ranking systems the owner did not specify — STILL BANNED. Section I is the exception that
+    proves the rule: an Algeria-only, challenge-only cumulative ranking is now specified in
+    writing. Anything past what I1-I3 describe is still invention, and the five questions at
+    the end of that section are the parts the owner has not answered yet.
   - vote weighting by osu! rank — users.global_rank is display-only
   - additional challenge rules
   - the vote page design — settled: the page as built IS the design (B6), so
