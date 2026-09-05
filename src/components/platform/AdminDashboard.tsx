@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Phase } from '../../types';
-import { api, ApiSubmission, ApiVoteAudit } from '../../api/client';
+import { api, ApiAllowedCountry, ApiSubmission, ApiVoteAudit } from '../../api/client';
 import { CurrentRound, formatDeadline, roundLabel, useCountdown } from '../../lib/round';
 import { beatmapUrl } from '../../lib/submission';
 import { AuthUser } from './NavHeader';
@@ -16,7 +16,7 @@ import {
 type AdminTab = 'round' | 'submissions' | 'eligibility' | 'rules' | 'challenge' | 'users' | 'config';
 
 /** Tabs backed by a real endpoint. The rest are still UI only. */
-const WIRED_TABS: AdminTab[] = ['round', 'submissions'];
+const WIRED_TABS: AdminTab[] = ['round', 'submissions', 'eligibility'];
 
 const TABS: { key: AdminTab; label: string; icon: React.ReactNode }[] = [
   { key: 'round',       label: 'Round Control', icon: <Clock className="w-4 h-4" /> },
@@ -754,91 +754,199 @@ function SubmissionsTab({
 }
 
 // ── ELIGIBILITY ───────────────────────────────────────────────────────────────
+//
+// The country half is C4 and real: GET/PUT/DELETE /api/admin/countries, read by the same
+// allowlist that requireEligible and ApiUser.canVote go through, so this tab and the gate
+// cannot disagree. The five hardcoded countries and the two invented exception rows that
+// used to live here are gone.
 
-const COUNTRIES = [
-  { code: 'DZ', name: 'Algeria', enabled: true },
-  { code: 'TN', name: 'Tunisia', enabled: false },
-  { code: 'MA', name: 'Morocco', enabled: false },
-  { code: 'LY', name: 'Libya',   enabled: false },
-  { code: 'EG', name: 'Egypt',   enabled: false },
-];
+/**
+ * Intl.DisplayNames knows every ISO 3166-1 region, so no country name is stored or
+ * hardcoded — which is what lets the allowlist be open-ended instead of a fixed list.
+ * Built once; `of` can throw on a code it does not recognise.
+ */
+const REGION_NAMES = (() => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' });
+  } catch {
+    return null;
+  }
+})();
+
+function countryName(code: string): string {
+  try {
+    return REGION_NAMES?.of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+/** The flag, built from the two letters as regional indicator symbols. */
+function flagEmoji(code: string): string {
+  const letters = [...code.toUpperCase()];
+  if (letters.length !== 2 || letters.some((l) => l < 'A' || l > 'Z')) return '\u{1F3F3}';
+  return String.fromCodePoint(...letters.map((l) => 0x1f1e6 + l.charCodeAt(0) - 65));
+}
 
 function EligibilityTab() {
-  const [countries, setCountries] = useState(COUNTRIES);
-  const [exceptions, setExceptions] = useState([
-    { id: '1', username: 'Rimuru_dz',    country: 'DZ', allowed: true,  note: 'Community founder' },
-    { id: '2', username: 'Saya_Kizuname', country: 'FR', allowed: true,  note: 'Diaspora exception' },
-  ]);
-  const [newEx, setNewEx] = useState('');
+  const [countries, setCountries] = useState<ApiAllowedCountry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  /** The code currently being written, so only its own row shows as busy. */
+  const [busy, setBusy] = useState<string | null>(null);
+  const [newCode, setNewCode] = useState('');
 
-  const toggle = (code: string) =>
-    setCountries((prev) => prev.map((c) => c.code === code ? { ...c, enabled: !c.enabled } : c));
+  const load = useCallback(async () => {
+    const rows = await api.admin.countries();
+    if (rows === null) {
+      setError('Could not read the country allowlist.');
+      return;
+    }
+    setError(null);
+    setCountries(rows);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const write = async (code: string, enabled: boolean) => {
+    setBusy(code);
+    const res = await api.admin.setCountry(code, enabled);
+    setBusy(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    await load();
+  };
+
+  const drop = async (code: string) => {
+    setBusy(code);
+    const res = await api.admin.removeCountry(code);
+    setBusy(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    await load();
+  };
+
+  const add = async () => {
+    const code = newCode.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(code)) {
+      setError('A country code is two letters, like DZ.');
+      return;
+    }
+    setNewCode('');
+    await write(code, true);
+  };
+
+  const enabledCount = countries?.filter((c) => c.enabled).length ?? 0;
 
   return (
     <div className="space-y-5">
-      <Section title="Country Allowlist" description="Only players from enabled countries may submit or vote.">
-        <div className="space-y-2">
-          {countries.map((c) => (
-            <div key={c.code} className="flex items-center justify-between py-2 border-b border-slate-800/60 last:border-0">
-              <div className="flex items-center gap-3">
-                <span className="text-lg">{c.code === 'DZ' ? '🇩🇿' : c.code === 'TN' ? '🇹🇳' : c.code === 'MA' ? '🇲🇦' : c.code === 'LY' ? '🇱🇾' : '🇪🇬'}</span>
-                <div>
-                  <p className="text-sm font-bold text-white">{c.name}</p>
-                  <p className="text-[10px] text-slate-600 font-mono">{c.code}</p>
-                </div>
-              </div>
-              <button type="button" onClick={() => toggle(c.code)} className="transition-opacity hover:opacity-80">
-                {c.enabled
-                  ? <ToggleRight className="w-7 h-7 text-emerald-400" />
-                  : <ToggleLeft  className="w-7 h-7 text-slate-600" />}
-              </button>
-            </div>
-          ))}
+      {error && (
+        <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+          <p className="text-xs text-rose-300/90">{error}</p>
         </div>
-      </Section>
+      )}
 
-      <Section title="User Exceptions" description="Grant or block individual players regardless of country.">
+      <Section
+        title="Country Allowlist"
+        description="Only players from enabled countries may submit or vote. Everyone else can still read and comment."
+      >
         <div className="flex gap-2">
           <input
             type="text"
-            placeholder="osu! username"
-            value={newEx}
-            onChange={(e) => setNewEx(e.target.value)}
-            className="flex-1 bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors"
+            placeholder="Country code, e.g. TN"
+            maxLength={2}
+            value={newCode}
+            onChange={(e) => setNewCode(e.target.value.toUpperCase())}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void add();
+            }}
+            className="flex-1 bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm font-mono uppercase text-white placeholder-slate-600 focus:outline-none transition-colors"
           />
           <button
             type="button"
-            onClick={() => {
-              if (!newEx.trim()) return;
-              setExceptions((prev) => [...prev, { id: String(Date.now()), username: newEx.trim(), country: '??', allowed: true, note: '' }]);
-              setNewEx('');
-            }}
+            onClick={() => void add()}
             className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl transition-all"
           >
             <Plus className="w-3.5 h-3.5" />
             Add
           </button>
         </div>
-        <div className="space-y-2">
-          {exceptions.map((ex) => (
-            <div key={ex.id} className="flex items-center gap-3 bg-slate-900/40 border border-slate-800 rounded-xl px-4 py-2.5">
-              <div className="flex-1">
-                <p className="text-sm font-bold text-white">{ex.username}</p>
-                {ex.note && <p className="text-[10px] text-slate-500">{ex.note}</p>}
+
+        {countries === null ? (
+          <p className="text-xs text-slate-500 py-4">Loading the allowlist…</p>
+        ) : countries.length === 0 ? (
+          <p className="text-xs text-slate-500 py-4">
+            No countries listed. Nobody can submit or vote until one is added.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {countries.map((c) => (
+              <div
+                key={c.country}
+                className="flex items-center justify-between py-2 border-b border-slate-800/60 last:border-0"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-lg">{flagEmoji(c.country)}</span>
+                  <div>
+                    <p className="text-sm font-bold text-white">{countryName(c.country)}</p>
+                    <p className="text-[10px] text-slate-600 font-mono">{c.country}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={busy === c.country}
+                    onClick={() => void write(c.country, !c.enabled)}
+                    aria-label={c.enabled ? `Disable ${c.country}` : `Enable ${c.country}`}
+                    className="transition-opacity hover:opacity-80 disabled:opacity-40"
+                  >
+                    {c.enabled ? (
+                      <ToggleRight className="w-7 h-7 text-emerald-400" />
+                    ) : (
+                      <ToggleLeft className="w-7 h-7 text-slate-600" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy === c.country}
+                    onClick={() => void drop(c.country)}
+                    aria-label={`Remove ${c.country} from the list`}
+                    title="Remove the row entirely. Use the toggle to disable without forgetting the decision."
+                    className="text-slate-600 hover:text-rose-400 transition-colors disabled:opacity-40"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                ex.allowed
-                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                  : 'bg-rose-500/15 border-rose-500/30 text-rose-400'
-              }`}>
-                {ex.allowed ? 'Allowed' : 'Blocked'}
-              </span>
-              <button type="button" onClick={() => setExceptions((prev) => prev.filter((e) => e.id !== ex.id))} className="text-slate-600 hover:text-rose-400 transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {countries !== null && enabledCount === 0 && countries.length > 0 && (
+          <p className="text-[11px] text-amber-400/80">
+            Nothing is enabled, so submitting and voting are closed to everyone. That is a
+            supported way to pause a round — it does not affect administration.
+          </p>
+        )}
+      </Section>
+
+      <Section
+        title="User Exceptions"
+        description="Grant or block individual players regardless of country."
+      >
+        <p className="text-xs text-slate-500">
+          Not available yet. This is C5 in docs/todo.txt: submitting and voting will be
+          controlled independently per player, so an administrator can stop one without
+          stopping the other, or grant either to someone the country rule refuses. The two
+          example rows that used to sit here were invented, so they are gone rather than
+          left to look like real exceptions.
+        </p>
       </Section>
     </div>
   );
@@ -1264,7 +1372,7 @@ export function AdminDashboard({ round, user, onRoundChange, onLogin }: AdminDas
             <div className="mb-5 flex items-start gap-2.5 bg-amber-400/8 border border-amber-400/20 rounded-xl px-4 py-3">
               <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-px" />
               <p className="text-xs text-amber-400/80">
-                This tab is UI only — nothing here is saved. Round Control and Submissions are the wired ones.
+                This tab is UI only — nothing here is saved yet. The tab list in docs/todo.txt C7 says which item fills each one.
               </p>
             </div>
           )}

@@ -19,6 +19,7 @@ import {
   readSession,
   clearSession,
 } from '../session.js';
+import { enabledSet } from '../repo/allowedCountries.js';
 import { upsertFromOsu, findByOsuId, toApiUser } from '../repo/users.js';
 
 const router = Router();
@@ -60,7 +61,9 @@ router.get('/me', async (req, res) => {
 
   try {
     const user = await findByOsuId(osuId);
-    return res.json(user ? toApiUser(user) : null);
+    if (!user) return res.json(null);
+    // canVote has to agree with requireEligible, so it reads the same allowlist (C4).
+    return res.json(toApiUser(user, await enabledSet()));
   } catch (err) {
     console.error('[auth] /me lookup failed:', err instanceof Error ? err.message : err);
     return res.status(503).json({ error: 'Database unavailable' });

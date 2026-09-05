@@ -302,6 +302,74 @@ console.log('--- beatmap search (H4) ---');
   ok('an unknown sort answers 400 rather than defaulting', badSort.status === 400, `got ${badSort.status}`);
 }
 
+console.log('');
+console.log('--- country allowlist (C4) ---');
+{
+  const list = await call('/admin/countries');
+  if (list.status === 403) {
+    skipped('the allowlist checks', 'this session is not an administrator');
+  } else {
+    const rows = Array.isArray(list.body) ? list.body : [];
+    ok(
+      'GET /admin/countries reads the table',
+      list.status === 200 && Array.isArray(list.body),
+      `got ${list.status}: ${JSON.stringify(list.body).slice(0, 160)}`
+    );
+    // Migration 005 seeds DZ enabled. Without that row the allowlist refuses everyone,
+    // so this doubles as proof the seed landed.
+    ok(
+      'DZ is listed and enabled, so the seed in 005 landed',
+      rows.some((c) => c.country === 'DZ' && c.enabled === true),
+      JSON.stringify(rows)
+    );
+
+    const badCode = await call('/admin/countries/DZA', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: true }),
+    });
+    ok('a three-letter code answers 400', badCode.status === 400, `got ${badCode.status}`);
+
+    const badBody = await call('/admin/countries/TN', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: 'yes' }),
+    });
+    ok('a non-boolean enabled answers 400', badBody.status === 400, `got ${badBody.status}`);
+
+    const missing = await call('/admin/countries/ZZ', { method: 'DELETE' });
+    ok(
+      'removing a country that is not listed answers 404',
+      missing.status === 404,
+      `got ${missing.status}`
+    );
+
+    if (allowWrites) {
+      // Enable TN, confirm it reads back, then remove it — the tree is left as it was.
+      const added = await call('/admin/countries/TN', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: true }),
+      });
+      ok('enabling a second country succeeds', added.status === 200, `got ${added.status}`);
+
+      const after = await call('/admin/countries');
+      const tn = (Array.isArray(after.body) ? after.body : []).find((c) => c.country === 'TN');
+      ok('the second country reads back enabled', tn?.enabled === true, JSON.stringify(tn));
+
+      // canVote is computed from this same allowlist, so /auth/me must agree with it.
+      const me = await call('/auth/me');
+      ok(
+        'GET /auth/me still reports canVote from the allowlist',
+        me.status === 200 && typeof me.body?.canVote === 'boolean',
+        JSON.stringify(me.body)
+      );
+
+      const gone = await call('/admin/countries/TN', { method: 'DELETE' });
+      ok('removing it again succeeds, leaving the list as it was', gone.status === 200, `got ${gone.status}`);
+    } else {
+      skipped('the enable/disable round trip', 'it writes to the allowlist — pass --allow-writes');
+    }
+  }
+}
+
 console.log('\n--- rate limiting ---');
 if (allowWrites) {
   // 25 lookups of the same beatmap: the limit is 20 a minute, so the tail must be 429.

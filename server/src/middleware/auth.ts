@@ -4,6 +4,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { readSession } from '../session.js';
+import { enabledSet } from '../repo/allowedCountries.js';
 import { findByOsuId, isEligible, type UserRow } from '../repo/users.js';
 
 declare global {
@@ -52,17 +53,42 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 }
 
 /**
- * requireAuth plus the country gate. isEligible lives in repo/users.ts so this gate
- * and the canVote flag on ApiUser cannot disagree about who may vote.
+ * requireAuth plus the country gate. isEligible lives in repo/users.ts so this gate and
+ * the canVote flag on ApiUser cannot disagree about who may vote.
+ *
+ * Two stages, written flat rather than nested, because the country half is async now
+ * (C4 moved the countries into a table). Handing requireAuth an async callback would
+ * leave a promise nobody awaits, and a rejection inside it would surface as an unhandled
+ * rejection rather than a 503.
+ *
+ * The refusal NAMES the countries. It used to say "Algerian osu! accounts", which stops
+ * being true the moment an administrator enables a second country, and a player refused
+ * without being told what the rule is has nothing to act on.
  */
 export async function requireEligible(req: Request, res: Response, next: NextFunction): Promise<void> {
+  let authenticated = false;
   await requireAuth(req, res, () => {
-    if (!req.user || !isEligible(req.user)) {
-      res.status(403).json({
-        error: 'Submitting and voting are limited to Algerian osu! accounts',
-      });
-      return;
-    }
-    next();
+    authenticated = true;
   });
+  if (!authenticated) return; // requireAuth has already answered.
+
+  let allowed: ReadonlySet<string>;
+  try {
+    allowed = await enabledSet();
+  } catch (err) {
+    console.error('[auth] country allowlist read failed:', err instanceof Error ? err.message : err);
+    res.status(503).json({ error: 'Database unavailable' });
+    return;
+  }
+
+  if (!req.user || !isEligible(req.user, allowed)) {
+    const list = [...allowed].sort().join(', ');
+    res.status(403).json({
+      error: list
+        ? `Submitting and voting are limited to these countries: ${list}`
+        : 'Submitting and voting are closed — no country is currently enabled',
+    });
+    return;
+  }
+  next();
 }

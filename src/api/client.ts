@@ -198,6 +198,24 @@ export interface ApiVoteAudit {
   castAt: string;
 }
 
+
+/**
+ * One country on the submit-and-vote allowlist.
+ *
+ * A row with enabled false is kept rather than deleted: it records that an administrator
+ * considered the country and refused it, which an absent row does not say. The country
+ * NAME is not stored — the client derives it from the code with Intl.DisplayNames, so
+ * adding a country is two letters rather than a code change.
+ */
+export interface ApiAllowedCountry {
+  /** ISO 3166-1 alpha-2, upper case. */
+  country: string;
+  enabled: boolean;
+  /** The administrator who last changed this decision; null if their account is gone. */
+  addedBy: number | null;
+  addedAt: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -357,6 +375,21 @@ export const api = {
         "/admin/round/winner",
         submissionId === undefined ? {} : { submissionId }
       ),
+    /**
+     * The country allowlist. Every row, disabled ones included — the admin tab shows
+     * both, and a disabled row is a decision rather than an absence.
+     */
+    countries: () => get<ApiAllowedCountry[]>("/admin/countries"),
+    /** Adds a country, or flips one that is already listed. */
+    setCountry: (code: string, enabled: boolean) =>
+      send<{ ok: boolean; country: ApiAllowedCountry }>(
+        "PUT",
+        `/admin/countries/${code.toUpperCase()}`,
+        { enabled }
+      ),
+    /** Removes the row outright — for a code typed by mistake, not for disabling one. */
+    removeCountry: (code: string) =>
+      send<{ ok: boolean }>("DELETE", `/admin/countries/${code.toUpperCase()}`),
     /**
      * Who voted for what, for moderation. Admin-only by construction — nothing public
      * exposes voter identity.

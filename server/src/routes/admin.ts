@@ -29,6 +29,14 @@ import {
   type ReviewDecision,
 } from '../repo/submissions.js';
 import { findByOsuId } from '../repo/users.js';
+import {
+  isCountryCode,
+  listAll as listCountries,
+  normalise as normaliseCountry,
+  remove as removeCountry,
+  setEnabled as setCountryEnabled,
+  toApiAllowedCountry,
+} from '../repo/allowedCountries.js';
 import { announceBallotClosed, announcePhase, announceWinner } from '../services/discord.js';
 import { listForRound as listVotes, toApiVoteAudit } from '../repo/votes.js';
 import {
@@ -488,6 +496,75 @@ router.patch('/submissions/:id', async (req, res) => {
     res.json({ ok: true, submission: toApiSubmission(updated) });
   } catch (err) {
     fail(res, err, 'submission review');
+  }
+});
+
+// ── Country allowlist (C4) ───────────────────────────────────────────────────
+//
+// These replace ELIGIBLE_COUNTRY, which was a constant in repo/users.ts. Enabling a
+// country here is what lets its players submit and vote; requireEligible and the canVote
+// flag on ApiUser both read the same table through the same cache, so they cannot drift.
+//
+// NOTHING STOPS AN ADMINISTRATOR DISABLING EVERY COUNTRY, on purpose. It is a legitimate
+// way to pause participation, it locks nobody out of administration — requireAdmin is
+// requireAuth plus is_admin, not eligibility — and C5 will let individuals be granted
+// back. Refusing the action would be guessing at intent.
+
+router.get('/countries', async (_req, res) => {
+  try {
+    const rows = await listCountries();
+    res.json(rows.map(toApiAllowedCountry));
+  } catch (err) {
+    fail(res, err, 'country allowlist read');
+  }
+});
+
+router.put('/countries/:code', async (req, res) => {
+  const { code } = req.params;
+  if (!isCountryCode(code)) {
+    res.status(400).json({ error: 'Country must be a two-letter ISO 3166-1 alpha-2 code' });
+    return;
+  }
+
+  const { enabled } = req.body ?? {};
+  if (typeof enabled !== 'boolean') {
+    res.status(400).json({ error: 'enabled must be true or false' });
+    return;
+  }
+
+  // requireAdmin guarantees req.user, but the type does not know that.
+  const admin = req.user;
+  if (!admin) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  try {
+    const row = await setCountryEnabled(code, enabled, admin.id);
+    res.json({ ok: true, country: toApiAllowedCountry(row) });
+  } catch (err) {
+    fail(res, err, 'country allowlist write');
+  }
+});
+
+// Distinct from disabling: this is for a code typed by mistake, where a disabled 'XZ'
+// row would be noise rather than the record of a decision that a disabled 'TN' is.
+router.delete('/countries/:code', async (req, res) => {
+  const { code } = req.params;
+  if (!isCountryCode(code)) {
+    res.status(400).json({ error: 'Country must be a two-letter ISO 3166-1 alpha-2 code' });
+    return;
+  }
+
+  try {
+    const removed = await removeCountry(code);
+    if (!removed) {
+      res.status(404).json({ error: `${normaliseCountry(code)} is not on the allowlist` });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'country allowlist delete');
   }
 });
 

@@ -20,22 +20,25 @@ export interface UserRow {
 
 const COLUMNS = 'id, osu_id, username, country_code, avatar_url, global_rank, is_admin';
 
-/** ISO 3166-1 alpha-2 of the community this platform serves. */
-export const ELIGIBLE_COUNTRY = 'DZ';
-
 /**
- * Whether this account may submit and vote. docs/my_plan.txt: Algerian players may
- * submit and vote, everyone else may read and comment.
+ * Whether this account may submit and vote. docs/my_plan.txt: players from the
+ * community's countries may submit and vote, everyone else may read and comment.
  *
  * The rule lives here, beside toApiUser, so that middleware/auth.ts's gate and the
  * canVote flag the client reads are the same sentence rather than two copies that
  * drift. country_code is char(2) and Postgres blank-pads it, hence the trim.
- * Administrator-granted exceptions for diaspora players are specified in
- * docs/my_plan.txt too but have no table yet, so today the osu! profile country is
- * the whole rule.
+ *
+ * TAKES THE ALLOWLIST RATHER THAN READING IT (C4). The countries live in a table now,
+ * but this stays a pure function of a row and a set: the two callers each load the set
+ * once — through the cache in repo/allowedCountries.ts — and neither of them turns
+ * async in a place where it would have to await inside a render or a map. Passing it in
+ * is also what keeps this testable without a database.
+ *
+ * Administrator-granted per-player exceptions are C5, and they layer on top of this
+ * rather than replacing it.
  */
-export const isEligible = (row: UserRow): boolean =>
-  row.country_code.trim().toUpperCase() === ELIGIBLE_COUNTRY;
+export const isEligible = (row: UserRow, allowedCountries: ReadonlySet<string>): boolean =>
+  allowedCountries.has(row.country_code.trim().toUpperCase());
 
 /**
  * Creates the user on first login and refreshes the mutable fields on every
@@ -74,8 +77,13 @@ export async function findByOsuId(osuId: number): Promise<UserRow | null> {
   return rows[0] ?? null;
 }
 
-/** Maps a row to the ApiUser DTO declared in src/api/client.ts. */
-export function toApiUser(row: UserRow) {
+/**
+ * Maps a row to the ApiUser DTO declared in src/api/client.ts.
+ *
+ * Takes the allowlist for the same reason isEligible does: canVote and the gate that
+ * refuses the write have to be the same sentence, so they read the same set.
+ */
+export function toApiUser(row: UserRow, allowedCountries: ReadonlySet<string>) {
   return {
     id: row.id,
     osuId: Number(row.osu_id),
@@ -84,6 +92,6 @@ export function toApiUser(row: UserRow) {
     avatarUrl: row.avatar_url ?? '',
     globalRank: row.global_rank,
     isAdmin: row.is_admin,
-    canVote: isEligible(row),
+    canVote: isEligible(row, allowedCountries),
   };
 }
