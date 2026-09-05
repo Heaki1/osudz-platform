@@ -1,263 +1,264 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# CHECKPOINT — 2026-09-05, end of day. READ THIS FIRST.
+# CHECKPOINT — 2026-09-05, second session. READ THIS FIRST.
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # Written so the next session can resume from this file and the repository alone,
 # with no conversation history. Everything below was true at the moment it was
 # written; re-confirm the live state with the commands at the end.
+#
+# This replaces the earlier checkpoint of the same date. The previous one said HEAD
+# was ba7fa1c; two commits have landed since, and every open question it listed as
+# needing the owner has now been answered.
 
-  HEAD      ba7fa1c317f7ec2a7b3b953676dcd6bbff494151
-            ba7fa1c "docs: record what remains and what blocks each item"
+  HEAD      9d72e7e22f15dbe4c85a3d43a553d47769f73db5
+            9d72e7e "feat: search beatmaps against the osu! API"
   BRANCH    main
   TREE      clean — nothing uncommitted, nothing stashed
-  BASELINE  1bcad8e, 23 commits back
-
-  ba7fa1c is the commit every check below was RUN AT. The commit carrying this
-  checkpoint sits directly on top of it and changes documentation only — no source
-  file differs between the two, so the results still hold. `git log -1` tomorrow will
-  show the checkpoint commit, not ba7fa1c.
+  BASELINE  1bcad8e, 25 commits back
 
   VERIFICATION AT THIS COMMIT, all green:
     npm run typecheck                 PASS
     cd server && npm run typecheck    PASS
     npm run build                     PASS
-    npm test                          45 passed (22 client, 23 server)
-    unauthenticated API sweep          28 passed, 0 failed
+    npm test                          60 passed (28 client, 32 server)
+    GET /api/search/beatmaps           401 signed out, live; 404 fallback intact
+
+  ────────────────────────────────────────────────────────────────────────────────
+  THE ONE THING WAITING ON HEAKI. Nothing else in this roadmap is blocked on a
+  decision any more — only on this command, and on the two account items at the end.
+
+    cd C:\Users\heaki\Desktop\newdz\server
+    pnpm run migrate:status     # expect 4 applied, 7 pending: 005 through 011
+    pnpm run migrate            # expect "7 of 7 pending migration(s) applied"
+
+  Seven migrations are written and unapplied. They cover EIGHT roadmap items, and no
+  code reads any of them yet, so applying them changes nothing on screen — that is
+  deliberate. A failure is safe: the runner wraps each file in its own transaction and
+  rolls back on error (scripts/migrate.ts:100-105), so a bad file leaves no partial
+  schema. `migrate:status` does NOT validate SQL; the first real validation is
+  `migrate` itself.
+  ────────────────────────────────────────────────────────────────────────────────
 
 
-## ITEM STATUS — 48 items (the original 46, plus C8 and C9 surfaced by the C7 audit)
+## ITEM STATUS — 48 items
 
-  31 DONE · 13 TODO · 1 IN PROGRESS · 1 BLOCKED · 1 DECIDED · 1 NOT ASKED
+  32 DONE · 12 TODO · 1 IN PROGRESS · 1 BLOCKED · 1 DECIDED · 1 NOT ASKED
 
   A. SUBMISSION      A1 DONE   A2 DONE   A3 DONE   A4 TODO   A5 TODO
   B. VOTING          B1 DONE   B2 DONE   B3 DONE   B4 DONE   B5 DONE   B6 DONE
                      B7 DONE   B8 TODO   B9 TODO   B10 DONE  B11 DONE  B12 DONE
   C. LIFECYCLE       C1 DONE   C2 DONE   C3 DONE   C4 TODO   C5 TODO
                      C6 NOT ASKED        C7 IN PROGRESS (audit done, wiring not)
-                     C8 TODO (new)       C9 TODO (new)
+                     C8 TODO             C9 TODO
   D. WINNER          D1 DECIDED (implemented by D2 and D3)   D2 DONE   D3 DONE
                      D4 TODO
   E. CHALLENGE       E1 DONE   E2 DONE   E3 DONE   E4 DONE
   F. ARCHIVE         F1 DONE   F2 DONE
   G. OAUTH/SECURITY  G1 TODO (operational, owner only)       G2 DONE   G3 DONE
                      G4 DONE   G5 DONE   G6 TODO
-  H. TESTING/CLEANUP H1 DONE   H2 DONE   H3 DONE   H4 TODO   H5 TODO
+  H. TESTING/CLEANUP H1 DONE   H2 DONE   H3 DONE   H4 DONE   H5 TODO
                      H6 BLOCKED
 
   Each item's own entry below carries its full WHAT / WHY / DEPS / VERIFY, what
   landed, and every decision recorded against it. This table is only the index.
 
 
-## COMMITS SINCE THE BASELINE, newest first
+## DECISIONS TAKEN THIS SESSION — all four, and they close the open list
 
-  ba7fa1c  docs: record what remains and what blocks each item
-           The "WHAT REMAINS" section below — 15 open items grouped by what blocks
-           each: eight on a migration, three on a decision, the rest on the owner's
-           account or on work above them.
-  f257811  test: add vitest and cover the round, vote and challenge logic
-           H2. vitest via pnpm, two configs (vitest.client.config.ts,
-           vitest.server.config.ts), 6 test files, 45 tests. Test scripts in both
-           package.json files. Proved the tests bite by breaking pageAccess.
-  7743c1f  test: sweep the API and hand over the authenticated checks
-           verify-authenticated.mjs in the repo root, plus the comprehensive-pass
-           record below. No source changes.
-  54804fa  feat: give administrators a vote moderation view
-           B11. repo/votes.ts listForRound + toApiVoteAudit, GET /api/admin/votes,
-           ApiVoteAudit, and a collapsed Ballot panel in Round Control.
-  1a082f9  feat: rate-limit writes, harden the cookie and CORS config, wire Discord
-           G3 + G4 + G5. middleware/rateLimit.ts; env.ts gained requiredInProduction
-           and useSecureCookies; services/discord.ts and its call sites.
-  5aeffae  fix: show a loading state on the vote page, and drop a dead fixture
-           B12 + H3. VotePage gained a `loading` prop; votingBeatmaps deleted.
-  7105e34  feat: render the archive from real rounds
-           F1 + F2. participantCounts in repo/rounds.ts, GET /api/rounds and
-           /rounds/:id return winner + leaderboard + participants, ArchivePage
-           fetches it, archiveData and the ArchiveEntry/ChallengeScore types deleted.
-  46a8cbc  feat: render the real challenge leaderboard
-           E3. ChallengeLeaderboard and MyChallengeScore read the API; AuthUser
-           gained `id`; the fabricated challengeScores export deleted.
-  1306bc0  feat: give every round a challenge prize by default
-           E4. DEFAULT_REWARD in the admin round route; the prize shown in the round
-           header; the header stops counting down a closed ballot.
-  88e333a  feat: implement challenge scores, fetched from osu! and enterable by hand
-           E1 + E2. repo/challengeScores.ts, routes/challenge.ts,
-           services/osu.ts fetchUserScore, POST /api/admin/challenge/scores,
-           ApiChallengeScore and the api.challenge seam.
-  ce2ca31  docs: settle the osu! token question and audit the admin tabs
-           The A5 token comparison, the E2 score-read answer, the C7 tab audit, and
-           C8/C9. Docs only — no code.
-  1fbb316  fix: stop the nav badge counting down a closed ballot
-  8c60705  feat: advance round phases automatically when due          (C2)
-  61dbe37  feat: show the closed ballot and its winner on the vote page  (B7)
-  acea87f  feat: serve the recorded round winner to the client        (D3)
-  9232dbc  feat: approve the winner from the admin dashboard          (D2 UI)
-  84e7a1e  feat: record a pending winner when voting closes           (D2 server)
-  20c6b04  feat: let a submitter withdraw their entry                 (A3)
-  4838c7f  fix: keep every API response inside the error contract     (G2)
-  3afcd34  docs: record the frozen-ballot rule and the vote page's closed states
-  e8b68e5  fix: refuse backwards round phase transitions              (C3)
-  3b3f9ce  chore: add typecheck scripts to both packages              (H1)
-  60e8b28  docs: add the master roadmap and record the owner's decisions
+  1  C8 beatmap rules      GLOBAL, ONE ROW. Not per-round. C9's mod and challenge-type
+                           lists share the same store. Recorded in C8 and C9.
+  2  The config tab's      DELETE ALL THREE — site name, "Max Submissions Per User /
+     three loose controls   Round", maintenance mode. The max-submissions input is not a
+                           setting that exists: submissions_one_per_user_per_round fixes
+                           it at one. Recorded in C7, and it was C7's only open question.
+  3  Challenge eligibility KEEPS requireEligible. Non-Algerian accounts may read and
+                           comment but not compete. The code already matched, so this
+                           changed nothing — it turns E2's flagged ASSUMPTION into a
+                           decision. Recorded in E2.
+  4  Work order            Write the DDL, hand it over, then build H4 while it waits.
+                           Which is what happened.
 
 
-## LIVE STATE — round, database, and what has actually been exercised
+## COMMITS THIS SESSION, newest first
 
-  Read from the running API at 2026-09-05 00:30. Re-check it tomorrow; the owner has
-  been driving the app between sessions and it has moved every time.
+  9d72e7e  feat: search beatmaps against the osu! API
+           H4. services/osu.ts gained searchBeatmapsets, pickDifficulty and orderHits;
+           new routes/search.ts behind requireAuth plus a 20/minute limiter; ApiSearchHit
+           and the api.search seam; SearchPage fetches with a 400ms debounce and four
+           real states; searchBeatmaps deleted from sampleData.ts. 15 new tests, and ten
+           read-only checks added to verify-authenticated.mjs.
+  0dd265f  feat: add the DDL for the eight migration-blocked roadmap items
+           005 through 011. No code reads any of it yet.
+
+## LIVE STATE — re-read from the running API at this commit
+
+  Unchanged from the previous checkpoint: the owner has not driven the app since. Facts,
+  not tasks, but they decide what can be tested.
 
   ROUND       id 3, displayed as "Round 1 · September 2026"
               phase        challenge
               winnerStatus official, approved 2026-09-04T20:52:16Z
               winner       submission 2 — Kano, "Souzou Forest" [Expert]
                            mod HD, requirement "Lowest Miss Count"
-              tally        winnerVoteCount 0, totalVotes 0 — the ballot was closed
-                           with NO votes cast and exactly ONE approved entry, so it
-                           went through the PENDING path: one leader, not a tie.
-                           THE TIEBREAK PATH HAS NOT BEEN EXERCISED with real data.
-                           It needs two or more approved entries level at the top,
-                           which includes two entries and no votes at all.
+              tally        winnerVoteCount 0, totalVotes 0 — the ballot closed with NO
+                           votes and exactly ONE approved entry, so it took the PENDING
+                           path: one leader, not a tie. THE TIEBREAK PATH HAS STILL NOT
+                           BEEN EXERCISED with real data. It needs two or more approved
+                           entries level at the top, which includes two entries and no
+                           votes at all.
               reward       '' — this round predates E4's default, so the hero reads
                            "To be announced". Correct, not a bug.
-              schedule     submission ends 2026-09-10, voting 2026-09-13,
-                           challenge 2026-10-04 (all still in the future, so the C2
-                           clock has nothing due and is a no-op right now)
-
-  SUBMISSIONS 1 approved (id 2, the winner above). Nothing pending.
+              schedule     submission ended 2026-09-10, voting 2026-09-13, challenge
+                           2026-10-04. Voting never opened: an admin closed the ballot
+                           and approved the winner by hand, so the round is in the
+                           challenge phase with the submission deadline still in the
+                           future. The C2 clock has nothing due.
+  SUBMISSIONS 1 approved (id 2, the winner). Nothing pending.
   VOTES       empty.
   CHALLENGE   1 score, and it is REAL END-TO-END PROOF of E1+E2:
                 Heaki (osu 18844163), 32,502,940, 97.54%, 0 misses, HD,
                 qualified true, osuScoreId 5069480246, at 2026-09-04T23:33:04Z
-              osuScoreId is non-null, so it came through the osu! API import path
-              rather than the manual admin one. It confirms fetchUserScore against
-              the live API, the 0..1 → percentage accuracy conversion, the mods
-              normalisation, and qualifies() agreeing with a real play.
-  ARCHIVE     0 ended rounds, so the archive page shows its empty state. The
-              non-empty archive path has NOT been seen with real data.
-  MIGRATIONS  All four applied. Evidenced without touching the migration tool:
-              /rounds/current returns the 004 winner columns, and /challenge/scores
-              reads the 002 table without a 503. There is no 005 yet.
+              osuScoreId is non-null, so it came through the osu! API import path rather
+              than the manual admin one. It confirms fetchUserScore against the live API,
+              the 0..1 to percentage accuracy conversion, the mods normalisation, and
+              qualifies() agreeing with a real play.
+  ARCHIVE     0 ended rounds, so the archive page shows its empty state. The non-empty
+              archive path has NOT been seen with real data.
+  MIGRATIONS  001-004 applied. 005-011 written and PENDING — see the top of this file.
 
 
-## NEXT RECOMMENDED ORDER
 
-  Eight of the thirteen TODO items each need one migration, and only the owner
-  applies DDL. So the cheapest path by far is ONE migration covering all of them,
-  handed over once, then the code for each behind it.
+## THE MIGRATIONS, AND WHAT EACH UNBLOCKS
 
-  STEP 1  Write server/migrations/005_*.sql covering, in dependency order:
-            C4  allowed_countries        (country char(2) PK, enabled bool, added_by)
-            C5  participant_permissions  (user_id PK, can_submit, can_vote, note,
-                                          set_by, set_at)
-            A4  favorites                (user_id, difficulty_id, source 'dz'|'osu',
-                                          PK on all three so the two sources never
-                                          collide — the A4 decision)
-            B9  votes.updated_at
-            D4  the winner-correction audit columns or table
-            G6  the session revocation store
-            C8  the beatmap-rules settings store — BUT SEE THE DECISION BELOW; do
-                not include this until the owner answers global-vs-per-round
-          Then hand over ONE command and stop:
-            cd C:\\Users\\heaki\\Desktop\\newdz\\server
-            pnpm run migrate:status     # 005 should read as pending
-            pnpm run migrate
+  Seven files rather than one, because the runner applies every pending .sql in filename
+  order and each in its own transaction — so seven files still cost exactly ONE
+  `pnpm run migrate`, which is what the previous checkpoint's "one migration" was
+  optimising for. Each stays named after its item, keeps its own checksum lock, and is
+  small enough to read before applying. They are numbered in implementation order, so a
+  run that fails partway leaves a consistent prefix rather than an arbitrary subset.
 
-  STEP 2  Implement in this order, one commit each, once 005 is applied:
-            C4 → C5      both land in the same admin tab and the same eligibility
-                         read; C5 depends on C4
-            C7 phase two eligibility and users tabs become real once C4 and C5 exist;
-                         the config tab still needs the owner decision below
-            A4 → A5      A5 needs A4's store and NOTHING else — the token question is
-                         settled, the app token reads public favourites
-            H5           favoriteBeatmaps can be deleted the moment A4 lands
-            B9, D4, G6   independent of each other, lowest urgency
-            B8           comments; a whole feature, needs its own migration if not
-                         batched into 005
+    005_country_allowlist.sql          C4    seeded with DZ — the seed is LOAD-BEARING,
+                                             an empty table refuses every account
+    006_participant_permissions.sql    C5    both capability flags NULLABLE on purpose
+    007_favorites.sql                  A4/A5 source in the primary key, plus the display
+                                             columns submissions already denormalises
+    008_votes_updated_at.sql           B9
+    009_round_result_corrections.sql   D4    a table, not columns — a round can be
+                                             corrected more than once
+    010_session_revocation.sql         G6    users.session_epoch, a token version
+    011_site_settings.sql              C8/C9 seeded from today's hardcoded constants
 
-  STEP 3  H4, real beatmap search. The ONE open item that needs no migration and no
-          decision — it can be started at any time, including first if the owner
-          would rather not wait on DDL. Needs an osu! search endpoint plus a page's
-          worth of wiring, and it unblocks the second half of H5.
+  THREE PLACES THE DDL GOES BEYOND THE ITEM'S STATED WHAT, each argued in the file
+  header rather than left implicit:
+    - favorites carries title/artist/cover/stars/bpm/length. A4's WHAT lists only the
+      id, but the favorites grid renders cards, and the id alone means one osu! API call
+      per favorite on every dashboard load — which trips the 20/minute limiter at once.
+    - B9's column records WHEN a vote moved, not WHAT IT WAS. Recovering the previous
+      choice needs a history table, which B9 does not ask for. The gap is left open here
+      rather than quietly built.
+    - C4 changes the shape of isEligible. It is pure over UserRow today and feeds both
+      requireEligible and toApiUser, which is B4's guarantee and what users.test.ts
+      covers. When wiring it: keep isEligible(row, allowlist) PURE, read the enabled set
+      once per request in middleware/auth.ts behind a small cache invalidated on the
+      admin write, and pass it to both callers. Do not make it async in two places.
+
+  B8's comments table is deliberately NOT in this batch — a whole feature, and it belongs
+  in 012 alongside its own commit.
 
 
-## KNOWN ISSUES, SKIPPED TESTS, AND WHAT NEEDS THE OWNER
+## NEXT RECOMMENDED ORDER, once 005-011 are applied
 
-  NEEDS A DECISION — nothing else in the roadmap is waiting on the owner
-    1  The config admin tab. Site name, "Max Submissions Per User / Round", and
-       maintenance mode correspond to nothing in my_plan.txt or this roadmap, and the
-       server allows exactly one entry per user per round through a unique
-       constraint, so that input is not a setting that exists. Build them, or delete
-       those three controls? (This is the only question the C7 audit produced.)
-    2  C8: administrator-defined beatmap rules — global settings, or per-round? The
-       answer changes the shape of the table, so 005 should not include it until this
-       is answered.
-    3  Whether non-Algerian players may compete in the challenge. POST
-       /api/challenge/scores currently uses requireEligible, the same gate as
-       submitting and voting. That was an ASSUMPTION, not a decision — nothing in
-       my_plan.txt says. If they should be able to, that one middleware becomes
-       requireAuth and nothing else changes.
+  One item per commit, following THE LOOP below. Typechecks per item; one comprehensive
+  pass at the end, not after every item (see the traps).
+
+    1  C4 then C5    both land in the same admin tab and the same eligibility read, and
+                     C5 depends on C4. C4 deletes the two invented exception rows; C5
+                     deletes the six fabricated SAMPLE_USERS and the mock ban toggle.
+    2  C7 phase two  with C4, C5, E4 and G5 all landed, wire or retire the rest. `rules`
+                     becomes C8, `challenge` becomes C9, and the three config controls
+                     are DELETED per the decision above.
+    3  A4 then A5    the store, then the import button. A5 needs nothing else — the token
+                     question is settled, the app token reads public favourites.
+    4  H5            one deletion the moment A4 lands. favoriteBeatmaps is the only
+                     fixture left in src/.
+    5  C8 then C9    enforce the stored limits in POST /api/submissions AND in the lookup
+                     preview, so a player is told before submitting rather than after.
+    6  B9, D4, G6    independent of each other, lowest urgency.
+    7  B8            comments, with its own 012 migration. Note the eligibility split:
+                     commenting is requireAuth, not requireEligible.
+
+
+## KNOWN ISSUES AND WHAT NEEDS THE OWNER
+
+  NEEDS A DECISION
+    Nothing. All three questions the previous checkpoint listed are answered above.
 
   NEEDS THE OWNER'S MACHINE OR ACCOUNT
-    4  G1: delete osu! application 66562. Less urgent than it reads — server/.env is
+    1  The migrate command at the top of this file.
+    2  G1: delete osu! application 66562. Less urgent than it reads — server/.env is
        already on OSU_CLIENT_ID=67250 and that application authenticates fine, so the
        rotation is done. Deleting the old app is what remains.
-    5  Run the authenticated verification, which cannot be done without a session:
+    3  Run the authenticated verification, which cannot be done without a session:
          node verify-authenticated.mjs "<osudz_session cookie value>"
-       Read-only unless --allow-writes.
+       Read-only unless --allow-writes. It now covers the ten H4 search checks too, and
+       those are the half of H4 that cannot be reached signed out: requireAuth answers
+       before the parameter validation, so the 400s need a cookie.
+
+  A TRAP FOUND THIS SESSION, NOT YET FIXED
+    4  core.autocrlf is true and there is no .gitattributes, so the .sql files are LF on
+       disk here but would come out CRLF in a fresh clone. The migration runner checksums
+       file contents, so a fresh clone after applying would report [CHANGED] on all
+       eleven migrations and exit 6 with "the database no longer matches the files" — for
+       nothing but line endings. It bites only on a fresh checkout, so it does not block
+       this handover. The fix is one line, `*.sql text eol=lf` in .gitattributes, left as
+       its own commit rather than bundled into the DDL.
 
   NOT VERIFIED, each with its reason
-    6  Every authenticated path. No way to forge a session here; see item 5.
-    7  The C2 deadline behaviour. Nothing is due on this instance, so the clock was
+    5  Every authenticated path, including H4's own 400s. No way to forge a session
+       here; see item 3.
+    6  The C2 deadline behaviour. Nothing is due on this instance, so the clock was
        confirmed only as a no-op. Testing it needs an admin session and PATCH
        /api/admin/round/phase with endsAt — NOT a hand-written UPDATE.
-    8  Any page but the dashboard in a browser. THE APP HAS NO URL ROUTING:
-       platformPage is React state with no history sync, so /vote and /archive are
-       not addressable and a headless browser cannot reach them. This is also a
-       product gap — nobody can link or bookmark a page — and it is flagged for the
-       owner rather than fixed, since routing was never asked for.
-    9  A live Discord announcement. DISCORD_WEBHOOK is set, but firing one means
+    7  The search page in a browser. THE APP HAS NO URL ROUTING: platformPage is React
+       state with no history sync, so /search is not addressable and a headless browser
+       cannot reach it. Also a product gap — nobody can link or bookmark a page — and it
+       is flagged for the owner rather than fixed, since routing was never asked for.
+    8  A live Discord announcement. DISCORD_WEBHOOK is set, but firing one means
        advancing a real phase.
-   10  The archive with real content. No round has ended yet, so only its empty state
-       has been seen.
-
-  DELIBERATELY NOT WRITTEN, not forgotten
-   11  The vote refusal matrix as supertest cases (part of H2's original WHAT). It
-       needs a live database and a forged session; verify-authenticated.mjs covers
-       that ground with a real session instead, which is both safer and closer to
-       what ships.
+    9  The archive with real content. No round has ended yet.
 
   TRAPS FOR THE NEXT SESSION
-   12  THIS REPO IS pnpm. `npm install` fails on it with EUNSUPPORTEDPROTOCOL over a
+   10  THIS REPO IS pnpm. `npm install` fails on it with EUNSUPPORTEDPROTOCOL over a
        workspace:* reference. Use `pnpm add -D <pkg>`. (`npm run <script>` is fine.)
-   13  server/ is NodeNext: every relative import, test files included, must end in
-       '.js' even though the file on disk is '.ts'. vitest.server.config.ts carries a
-       resolver plugin for that; tsc enforces it.
-   14  Unit tests must never read server/.env. vitest.server.config.ts supplies fixed
+   11  server/ is NodeNext: every relative import, test files included, must end in
+       '.js' even though the file on disk is '.ts'.
+   12  Unit tests must never read server/.env. vitest.server.config.ts supplies fixed
        placeholder env values, because services/osu.ts imports env.ts, which validates
        at module load and exits the process on a missing variable.
-   15  Do not run the full project-wide verification after every item — the owner
-       asked for focused commits and one comprehensive pass at the end. Typechecks
-       per item, everything else at the end.
+   13  Do not run the full project-wide verification after every item — the owner asked
+       for focused commits and one comprehensive pass at the end.
+   14  An applied migration must NEVER be edited: the runner checksums it and treats a
+       change as a hard failure. Anything found wrong in 005-011 after applying becomes
+       012, not a fix in place.
+   15  Long shell heredocs get truncated by this harness somewhere past roughly a
+       hundred lines, which produces an "unexpected EOF" that looks like a quoting bug
+       and is not. Write long files in pieces.
 
 
 ## COMMANDS FOR TOMORROW
 
-  From C:\\Users\\heaki\\Desktop\\newdz
+  From C:\Users\heaki\Desktop\newdz
 
-    git log -1 --oneline          # expect ba7fa1c
+    git log -1 --oneline          # expect 9d72e7e
     git status --short            # expect empty
     npm run typecheck             # client
     cd server && npm run typecheck && cd ..
-    npm test                      # expect 22 + 23 passing
+    npm test                      # expect 28 + 32 passing
     npm run build
 
   To bring the app up, if it is not already running:
     cd server && pnpm run dev     # API on :3001
     pnpm run dev                  # client on :8443, from the repo root
-
-  If the key that changed was OSU_CLIENT_SECRET rather than an unrelated one,
-  restart the API afterwards and confirm:
-    curl http://localhost:3001/api/health
-  then log out and back in once, since the app token is cached in memory.
 
 # ══════════════════════════════════════════════════════════════════════════════
 # END OF CHECKPOINT — the roadmap proper begins below.
@@ -927,9 +928,12 @@ fix it as its own item with its own commit.
                claimed — two by items already on the roadmap (C4, C5, E4, G5) and two
                by plan requirements the roadmap had simply missed (C8, C9). Only three
                controls inside `config` are genuinely unclaimed.
-      OWNER DECISION NEEDED  Site name, max submissions per user per round, and
-               maintenance mode: build them, or delete those three controls? Nothing
-               else in this audit needs a decision.
+      ANSWERED 2026-09-05  DELETE ALL THREE. Site name, "Max Submissions Per User /
+               Round" and maintenance mode correspond to nothing in my_plan.txt or this
+               roadmap, and the max-submissions input is not a setting that exists at all
+               — submissions_one_per_user_per_round fixes it at one. They go with phase
+               two, in the same commit that wires the rest of the config tab. No question
+               from this audit is still open.
       DECIDED  INSPECT FIRST. Identify exactly which tabs are meant, what each one
                renders today, and where it is used. Delete nothing until what is
                obsolete has been named and the reason written down. A tab that a
@@ -975,8 +979,14 @@ fix it as its own item with its own commit.
              wired to read and write them.
       WHY    The tab promises configuration that does not exist, which is worse than
              no tab; and a submission today can be any star rating or length at all.
-      DEPS   none technically. Needs one decision: global settings or per-round?
-      STATUS Not started. Flagged for the owner rather than assumed into scope.
+      DEPS   none technically. The decision it was waiting on is ANSWERED.
+      DECIDED 2026-09-05  GLOBAL, ONE ROW. Not per-round: the `rules` tab has no round
+             selector, and per-round limits would need a defaults row as well as the
+             per-round rows. site_settings holds the limits, and C9's two lists with them.
+      STATUS The store EXISTS as server/migrations/011_site_settings.sql, seeded from
+             today's hardcoded constants so applying it changes nothing until the tab
+             writes to it. What remains is enforcement in POST /api/submissions and in
+             the lookup preview, plus wiring the tab. Waiting only on 011 being applied.
 
   C9  Configurable mods and challenge types                      [TODO — NEW, C7]
       SURFACED BY the C7 audit. ALLOWED_MODS and ALLOWED_CHALLENGE_TYPES are hardcoded
@@ -986,8 +996,11 @@ fix it as its own item with its own commit.
       WHAT   Move both lists into the same settings store C8 needs, validate
              submissions against the stored lists, and wire the tab.
       WHY    Two copies of the same list, one of which is a lie.
-      DEPS   C8's store, so they land together or C9 waits.
-      STATUS Not started. Flagged for the owner.
+      DEPS   C8's store, which now exists as 011_site_settings.sql with both lists
+             seeded from repo/submissions.ts verbatim.
+      STATUS Waiting on 011 being applied. Note repo/challengeScores.ts judges challenge
+             types BY NAME, so renaming one is not only a settings change — qualifies()
+             and orderFor() read those strings.
 
 # D. WINNER / RESULTS  ← the pivot for E and F
 
@@ -1246,11 +1259,12 @@ fix it as its own item with its own commit.
       deliberately: that column exists to mark API-imported plays, and its UNIQUE
       constraint is what stops a hand-entered score colliding with an imported one.
       A player must have signed in at least once, since user_id is a real foreign key.
-      ASSUMPTION, flagged rather than decided: POST /challenge/scores uses
-      requireEligible, the same gate as submitting and voting, so the challenge is for
-      the same community as the rest of the platform. Nothing in my_plan.txt says
-      whether non-Algerian players may compete. If they should, that one middleware
-      becomes requireAuth and nothing else changes.
+      DECIDED 2026-09-05, closing what had been flagged as an assumption: POST
+      /challenge/scores KEEPS requireEligible. The challenge is for the same community as
+      submitting and voting, so non-Algerian accounts may read the leaderboard and
+      comment but not compete. Nothing in my_plan.txt settled this either way; it is now
+      settled, and the code already matched, so no change was needed. If it is ever
+      reversed, that one middleware becomes requireAuth and nothing else moves.
       DECIDED  BOTH. A player's score on the winning map is fetched automatically
                from the osu! API and recorded in challenge_scores, AND
                administrators must have a manual import or entry option alongside
@@ -1671,7 +1685,51 @@ fix it as its own item with its own commit.
              5 COMMIT    "chore: delete the unused votingBeatmaps fixture"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  H4  Real beatmap search                                                [TODO]
+  H4  Real beatmap search                                                [DONE]
+      LANDED: SearchPage reads GET /api/search/beatmaps instead of filtering ten
+      fabricated maps in the browser, and searchBeatmaps is deleted from sampleData.ts.
+      BEHIND requireAuth, WHICH IS A TRADE RATHER THAN AN OVERSIGHT. Every call spends
+      one request from the application's osu! quota — the reason the lookup route is
+      limited — and this project's limiter keys on the ACCOUNT, because G3 refused IP
+      keying on the grounds that an IP is a household or a campus. So a search open to
+      the world would be either unlimited or limited by the wrong key. Requiring a
+      session costs a visitor nothing they could act on: searching exists to find a map
+      to favorite or submit, and both already need one. requireAuth and not
+      requireEligible — reading is for everybody, and the DZ gate belongs on the write.
+      THREE THINGS ABOUT THE OSU! ENDPOINT SHAPED IT, each stated on screen rather than
+      smoothed over:
+        - it answers with beatmapSETS, and this app's card model is one difficulty. A hit
+          is the set's hardest RATED difficulty, with difficultyCount carried through so
+          a card reads "hardest of 7 difficulties" instead of implying the set is one
+          map. A card per difficulty would put a dozen near-identical cards per result.
+        - it cannot sort by BPM at all. Stars go to the API; BPM is ordered server-side
+          over the page that came back, and the page says so under the result count.
+        - it has no 'approved' filter, approved being a legacy status, so that one is
+          served by searching the leaderboard set and keeping what came back approved.
+      Hits are narrowed to SUBMITTABLE_STATUSES throughout: this page exists to find a
+      map worth entering, and offering a qualified or graveyard map that the submit path
+      will refuse is a trap, not a wider search. No game-mode filter, deliberately
+      matching fetchBeatmap — narrowing search alone would make the two disagree about
+      what the platform accepts. A malformed set is SKIPPED where fetchBeatmap throws:
+      a lookup is one map the player named, so failing loudly is the only honest answer
+      there, but a search is fifty maps nobody named.
+      FOUR STATES the fixture never needed — searching, signed out, request failed, no
+      matches. 401 gets the page's own copy; the server's "Not authenticated" is true
+      and tells a player nothing about what to do next. The client seam uses send()
+      rather than get(), against that file's read convention and on purpose: those four
+      failures have to be told apart, and get()'s null collapses all of them into the
+      only one that is not an error.
+      beatmapUrl now takes the two ids rather than a whole ApiSubmission, so the search
+      card links out through the same function instead of a second copy of the format.
+      onFavorite is still a no-op here — A4 replaces the card's local favorite state
+      everywhere at once, and wiring one page early would leave two behaviours on screen.
+      TESTS 15 new over pickDifficulty, isSearchStatus, orderHits and searchHitToBeatmap;
+      60 passing now, up from 45. One bit immediately: pickDifficulty resolved to null
+      whenever no difficulty reported a star rating, because its seed and its fallback
+      were both -1. The contract is now explicit instead.
+      STILL TO VERIFY, and it needs a session: verify-authenticated.mjs gained ten
+      read-only search checks. requireAuth answers before the parameter validation runs,
+      so the 400s are only reachable with a cookie.
       WHAT   A search endpoint over the osu! API, and SearchPage reading it
              instead of searchBeatmaps from sampleData.ts.
       WHY    src/components/platform/SearchPage.tsx takes no props and calls no
@@ -1689,6 +1747,9 @@ fix it as its own item with its own commit.
              6 VERIFY    git log -1 --stat; git status --short clean
 
   H5  Drive the sample-data ledger to zero                               [TODO]
+      DOWN TO ONE, as of H4: favoriteBeatmaps is the only fixture left in src/, and it
+      belongs to A4. sampleData.ts is 88 lines holding nothing else. The moment A4 lands,
+      this item is one deletion.
       WHAT   Four seams remain. Close each with its owning item, then confirm
              sampleData.ts is empty and delete the file:
                favoriteBeatmaps  -> A4 / A5   (dashboard + submit page)
@@ -1752,12 +1813,37 @@ fix it as its own item with its own commit.
                     backwards moves are refused.
   A5 token storage  not now. Compare the three designs; "reconnect to osu!" is
                     preferred unless inspection argues otherwise.
+                    SUPERSEDED by the inspection it asked for: a player's favourite
+                    beatmapsets are public, so the app token reads them and NONE of the
+                    three designs is needed. Do not implement any of them. See A5.
   admin tabs        audit before deleting anything; name what is obsolete and why.
   B6                stays DONE. The vote page design is complete and must not be
                     redesigned.
   winner_status     PENDING and TIEBREAK stay as winner_status values with the
                     phase left at 'voting', unless implementation inspection finds
                     a concrete problem with that model.
+
+# DECISIONS SETTLED, ROUND THREE  (2026-09-05, second session)
+
+  These four close the open-questions list. Nothing in this roadmap is waiting on a
+  decision now — only on DDL being applied and on two things in the owner's osu! account.
+
+  C8 beatmap rules  GLOBAL, ONE ROW. Star, length and status limits live in one
+                    site_settings row, not per round: the `rules` tab has no round
+                    selector, and per-round limits would need a defaults row as well as
+                    the per-round rows. C9's mod and challenge-type lists share the store.
+  config tab        DELETE site name, "Max Submissions Per User / Round", and maintenance
+                    mode. They correspond to nothing in my_plan.txt or this roadmap, and
+                    the max-submissions input is not a setting that exists at all —
+                    submissions_one_per_user_per_round fixes it at one. This was the only
+                    question the C7 audit produced.
+  challenge gate    POST /api/challenge/scores KEEPS requireEligible. The challenge is for
+                    the same community as submitting and voting; non-Algerian accounts
+                    read and comment but do not compete. The code already matched, so this
+                    changed nothing — it turns E2's flagged ASSUMPTION into a decision.
+  work order        Write the DDL for every migration-blocked item as one batch, hand over
+                    one command, and build H4 while it waits. H4 was the only open item
+                    needing neither a migration nor a decision.
 
 
 # QUESTIONS OF FACT, NOT DECISIONS
@@ -1786,66 +1872,16 @@ fix it as its own item with its own commit.
     The model itself held up — nothing needed a new phase value.
 
 
-# WHAT REMAINS, AND WHAT BLOCKS EACH  (2026-09-05)
+# WHAT REMAINS, AND WHAT BLOCKS EACH
 
-Thirty-one items are DONE. Fifteen are not, and they fall into three groups. Nothing is
-merely unstarted for lack of time: every one is waiting on a migration only the owner can
-apply, on a decision only the owner can make, or on the owner's osu! account.
+SUPERSEDED. This section held a snapshot of the open items and what blocked each, written
+in the first session of 2026-09-05. It is gone rather than updated, because the CHECKPOINT
+at the top of this file now carries the same thing and two copies would drift — which is
+exactly what happened to it within a day: it listed H4 as open and named three questions
+for the owner, and all four of those have since moved.
 
-  WAITING ON ONE MIGRATION EACH — the code is not written, because writing it against a
-  table that does not exist yet means shipping something nobody can run. Each needs DDL
-  applied by the owner (never by me), so they are best done as one batch: write one
-  migration covering all of them, hand over a single `pnpm run migrate`, then implement.
-
-    A4  community favorites            a favorites table (user_id, difficulty_id, source)
-    A5  import osu! favorites          A4's store. The token question is SETTLED — the app
-                                       token reads public favourites, so no storage and no
-                                       second authorize hop. Only the table is missing.
-    B8  comments on submissions        a comments table
-    B9  when a vote was last moved     votes.updated_at
-    C4  country allowlist              an allowed_countries table
-    C5  per-participant permissions    a participant_permissions table
-    D4  admin result correction        audit columns on rounds
-    G6  session revocation             a revocation store, or a session table
-
-  WAITING ON A DECISION FROM THE OWNER
-
-    C7 phase two   Five admin tabs are unwired. Four are claimed by the items above and by
-                   E4/G5, which are done. The audit named ONE genuine question: site name,
-                   "max submissions per user / round", and maintenance mode correspond to
-                   nothing in my_plan.txt or this roadmap, and the server enforces exactly
-                   one entry per user per round through a unique constraint, so that input
-                   is not a setting that exists. Build them, or delete those three
-                   controls?
-    C8, C9         Surfaced BY the audit, not previously on this roadmap: my_plan.txt
-                   requires administrator-defined star/length/status limits and editable
-                   mod and challenge-type lists, and nothing enforces or stores any of it.
-                   C8 also needs a decision of its own — global settings, or per-round?
-                   Both then need C8's store, so they are a migration item too.
-
-  WAITING ON THE OWNER'S ACCOUNT, OR ON WORK ABOVE
-
-    G1  delete osu! application 66562. Operational, and less urgent than it reads: .env is
-        already on OSU_CLIENT_ID=67250, so the leaked application is no longer the
-        credential this repo authenticates with. Deleting it is what is left.
-    H4  real beatmap search. Not blocked by anything — it is the one remaining item that
-        could be built today. It needs an osu! search endpoint and a new page's worth of
-        wiring, and it was ranked below the challenge, archive, security and test work
-        that took this session.
-    H5  the sample-data ledger. Down to two fixtures from five: favoriteBeatmaps needs A4,
-        searchBeatmaps needs H4. Nothing else in src/ is fabricated.
-    H6  still BLOCKED, on the same authenticated-testing gap that
-        verify-authenticated.mjs now partly closes.
-
-  ONE HANDOVER, FOR THE AUTHENTICATED HALF OF THIS PASS
-
-    node verify-authenticated.mjs "<osudz_session cookie value>"
-
-    Read-only unless --allow-writes. It covers what could not be verified from here: the
-    per-caller reads, every phase gate, the frozen-ballot refusals, the self-vote refusal,
-    admin gating in both directions, the attempt to skip winner approval through the
-    generic phase endpoint, and the rate limiter.
-
+Read the checkpoint. It carries the item table, what each open item is waiting on, the
+migration handover, and the decisions that closed the three questions.
 
 # THE COMPREHENSIVE PASS, 2026-09-05
 
@@ -1907,8 +1943,9 @@ Facts, not tasks — but they shape what can be tested.
   - The votes table is empty.
   - All four migrations are applied, 004_round_winner.sql as of 2026-09-04. Every
     round therefore carries winner_status 'none' until a ballot is closed.
-  - No test runner in either package, but H1 added a typecheck script to both:
-    verification is `npm run typecheck` in each root plus `npm run build`.
+  - (STALE AS WRITTEN: this said there was no test runner. H2 landed vitest later the
+    same day, so verification is now `npm run typecheck` in each root, `npm test`, and
+    `npm run build`.)
 
 
 # DELIBERATELY ABSENT
