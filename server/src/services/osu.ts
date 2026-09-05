@@ -314,3 +314,195 @@ export async function fetchUserScore(difficultyId: number, osuUserId: number): P
           : null,
   };
 }
+
+// ── Beatmap search (client-credentials) ──────────────────────────────────────
+//
+// GET /beatmapsets/search answers with SETS, and this project's card model is one
+// difficulty, so each hit is represented by its set's hardest difficulty and carries a
+// count of the rest. Rendering every difficulty of every set would put a dozen
+// near-identical cards on screen per result.
+//
+// Hits are narrowed to SUBMITTABLE_STATUSES. This page exists to find a map worth
+// entering, and offering a qualified or graveyard map that the submit path will refuse
+// is a trap rather than a wider search.
+//
+// No game-mode filter, deliberately matching fetchBeatmap: the submit path does not
+// restrict a submission to osu!standard either, and quietly narrowing search alone
+// would make the two disagree about what this platform accepts.
+
+/** Which statuses a search may ask for. 'any' means every submittable status. */
+export type SearchStatus = 'any' | SubmittableStatus;
+
+/** How a page of hits is ordered. */
+export type SearchSort = 'stars' | 'bpm';
+
+/** One search hit: a beatmapset, represented by one of its difficulties. */
+export interface OsuSearchHit {
+  difficultyId: number;
+  beatmapsetId: number;
+  title: string;
+  artist: string;
+  mapper: string;
+  difficultyName: string;
+  mapStatus: SubmittableStatus;
+  coverUrl: string;
+  previewUrl: string;
+  stars: number;
+  bpm: number;
+  lengthSeconds: number;
+  /** Difficulties in the set, so a card can say the one shown is one of several. */
+  difficultyCount: number;
+}
+
+/**
+ * osu!'s own `s` filter. 'leaderboard' is its "has leaderboard" set — ranked,
+ * approved, qualified and loved — the widest filter that can contain a submittable
+ * map. osu! search has no 'approved' value at all, approved being a legacy status, so
+ * that one is served by searching the leaderboard set and keeping what came back
+ * approved.
+ */
+const SEARCH_STATUS_PARAM: Record<SearchStatus, string> = {
+  any: 'leaderboard',
+  ranked: 'ranked',
+  loved: 'loved',
+  approved: 'leaderboard',
+};
+
+export const isSearchStatus = (value: unknown): value is SearchStatus =>
+  value === 'any' || (SUBMITTABLE_STATUSES as readonly unknown[]).includes(value);
+
+/**
+ * The hardest RATED difficulty of a set — the one a search card represents. Returns
+ * null when the set lists none usable, which is what makes the whole hit skippable.
+ *
+ * An entry with no id or no star rating is skipped rather than tolerated, because
+ * OsuSearchHit requires both: a difficulty that cannot fill a card is not a candidate
+ * for representing the set, and letting one through here only moves the rejection into
+ * toSearchHit.
+ */
+export function pickDifficulty(beatmaps: unknown): Record<string, unknown> | null {
+  if (!Array.isArray(beatmaps)) return null;
+
+  let best: Record<string, unknown> | null = null;
+  let bestStars = -1;
+  for (const raw of beatmaps) {
+    if (!raw || typeof raw !== 'object') continue;
+    const b = raw as Record<string, unknown>;
+    if (asNumber(b.id) === null) continue;
+    const stars = asNumber(b.difficulty_rating);
+    if (stars === null) continue;
+    if (stars > bestStars) {
+      best = b;
+      bestStars = stars;
+    }
+  }
+  return best;
+}
+
+/**
+ * Orders a page of hits. The server owns the ordering for the same reason F1's
+ * leaderboard read does — one implementation rather than a second one in the client
+ * that could drift from it.
+ *
+ * 'stars' is the order osu! was asked for, so this only confirms it. 'bpm' is applied
+ * here because osu! search cannot sort by BPM at all, which means a BPM order covers
+ * the page that came back and not the whole result set. The page says so.
+ */
+export function orderHits(hits: OsuSearchHit[], by: SearchSort): OsuSearchHit[] {
+  return [...hits].sort((a, b) => (by === 'bpm' ? b.bpm - a.bpm : b.stars - a.stars));
+}
+
+/**
+ * Searches beatmapsets. One page — osu! paginates with a cursor and nothing on this
+ * page asks for more than the first screenful, so a cursor would be state with no
+ * reader.
+ *
+ * An empty query is legal and useful: osu! answers it with its own default listing,
+ * which is what gives the search page something to show before anyone has typed.
+ */
+export async function searchBeatmapsets(
+  query: string,
+  status: SearchStatus
+): Promise<OsuSearchHit[]> {
+  const params = new URLSearchParams({
+    s: SEARCH_STATUS_PARAM[status],
+    sort: 'difficulty_desc',
+  });
+  const trimmed = query.trim();
+  if (trimmed !== '') params.set('q', trimmed);
+
+  const res = await fetch(`${API_BASE}/beatmapsets/search?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${await getAppToken()}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`osu! GET /beatmapsets/search failed: ${res.status}`);
+
+  const body = (await res.json()) as { beatmapsets?: unknown };
+  if (!Array.isArray(body.beatmapsets)) {
+    throw new Error('osu! GET /beatmapsets/search returned an unexpected shape');
+  }
+
+  const hits: OsuSearchHit[] = [];
+  for (const raw of body.beatmapsets) {
+    const hit = toSearchHit(raw, status);
+    if (hit !== null) hits.push(hit);
+  }
+  return hits;
+}
+
+/**
+ * Flattens one set, or returns null when it is not something this page should offer: an
+ * unsubmittable status, a status the caller filtered out, or a shape missing something
+ * a card needs.
+ *
+ * Skipping a bad set is deliberate where fetchBeatmap throws on one. A lookup is about
+ * one specific map the player named, so failing loudly is the only honest answer; a
+ * search is fifty maps nobody named, and failing the whole page because one result is
+ * odd would be worse than quietly showing forty-nine.
+ */
+function toSearchHit(raw: unknown, status: SearchStatus): OsuSearchHit | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const set = raw as Record<string, unknown>;
+
+  const mapStatus = typeof set.status === 'string' ? set.status : '';
+  if (!(SUBMITTABLE_STATUSES as readonly string[]).includes(mapStatus)) return null;
+  if (status !== 'any' && mapStatus !== status) return null;
+
+  const difficulty = pickDifficulty(set.beatmaps);
+  if (difficulty === null) return null;
+
+  const covers = (set.covers ?? {}) as Record<string, unknown>;
+  const difficultyId = asNumber(difficulty.id);
+  const beatmapsetId = asNumber(set.id);
+  const stars = asNumber(difficulty.difficulty_rating);
+  // Per-difficulty BPM is the accurate one; the set's is the fallback for older sets
+  // that only report it at the top level.
+  const bpm = asNumber(difficulty.bpm) ?? asNumber(set.bpm);
+  const lengthSeconds = asNumber(difficulty.total_length);
+  const title = typeof set.title === 'string' ? set.title : '';
+  const artist = typeof set.artist === 'string' ? set.artist : '';
+  const mapper = typeof set.creator === 'string' ? set.creator : '';
+  const difficultyName = typeof difficulty.version === 'string' ? difficulty.version : '';
+
+  if (
+    difficultyId === null || beatmapsetId === null || stars === null || bpm === null ||
+    lengthSeconds === null || !title || !artist || !mapper || !difficultyName
+  ) {
+    return null;
+  }
+
+  return {
+    difficultyId,
+    beatmapsetId,
+    title,
+    artist,
+    mapper,
+    difficultyName,
+    mapStatus: mapStatus as SubmittableStatus,
+    coverUrl: typeof covers.cover === 'string' ? covers.cover : '',
+    previewUrl: typeof set.preview_url === 'string' ? set.preview_url : '',
+    stars: Math.round(stars * 100) / 100,
+    bpm: Math.round(bpm),
+    lengthSeconds: Math.round(lengthSeconds),
+    difficultyCount: Array.isArray(set.beatmaps) ? set.beatmaps.length : 1,
+  };
+}

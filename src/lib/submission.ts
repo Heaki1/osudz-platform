@@ -6,7 +6,7 @@
 // beatmapsetId or the review state. So the seam needs this small mapper rather
 // than a cast.
 
-import { ApiBeatmapPreview, ApiSubmission } from '../api/client';
+import { ApiBeatmapPreview, ApiSearchHit, ApiSubmission } from '../api/client';
 import { Beatmap } from '../types';
 
 export function toBeatmap(submission: ApiSubmission): Beatmap {
@@ -36,9 +36,15 @@ export function toBeatmap(submission: ApiSubmission): Beatmap {
   };
 }
 
-/** osu! difficulty URL for a submission, for "open on osu!" links. */
-export const beatmapUrl = (submission: ApiSubmission): string =>
-  `https://osu.ppy.sh/beatmapsets/${submission.beatmapsetId}#osu/${submission.difficultyId}`;
+/**
+ * osu! difficulty URL, for "open on osu!" links.
+ *
+ * Takes the two ids rather than a whole ApiSubmission so a search hit can use it too —
+ * both DTOs carry the same pair, and the alternative was a second copy of the URL
+ * format on the search page.
+ */
+export const beatmapUrl = (map: { beatmapsetId: number; difficultyId: number }): string =>
+  `https://osu.ppy.sh/beatmapsets/${map.beatmapsetId}#osu/${map.difficultyId}`;
 
 /**
  * How a review state is presented. Lives here rather than in a page because the
@@ -92,5 +98,28 @@ export function previewToBeatmap(preview: ApiBeatmapPreview): Beatmap {
     ar: preview.ar ?? undefined,
     od: preview.od ?? undefined,
     hp: preview.hp ?? undefined,
+  };
+}
+
+/**
+ * A search hit, shaped for the same card the rest of the app renders.
+ *
+ * The id is prefixed the way previewToBeatmap prefixes its own: these are not
+ * submissions, and a bare difficulty id sharing a key space with submission ids is the
+ * kind of collision that only shows up once both are on screen at once.
+ */
+export function searchHitToBeatmap(hit: ApiSearchHit): Beatmap {
+  return {
+    id: `search-${hit.difficultyId}`,
+    title: hit.title,
+    artist: hit.artist,
+    mapper: hit.mapper,
+    difficultyName: hit.difficultyName,
+    stars: hit.stars,
+    bpm: hit.bpm,
+    length: formatLength(hit.lengthSeconds),
+    status: hit.mapStatus,
+    coverUrl: hit.coverUrl,
+    previewUrl: hit.previewUrl || undefined,
   };
 }

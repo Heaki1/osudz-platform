@@ -216,6 +216,92 @@ if (user.isAdmin) {
   }
 }
 
+console.log('');
+console.log('--- beatmap search (H4) ---');
+// Read-only and cheap enough to run without --allow-writes: eight requests against a
+// 20-a-minute allowance. This is the half of H4 that cannot be checked signed out,
+// because requireAuth answers before the parameter validation ever runs.
+{
+  const submittable = ['ranked', 'loved', 'approved'];
+
+  const found = await call('/search/beatmaps?q=souzou');
+  const hits = Array.isArray(found.body?.results) ? found.body.results : [];
+  ok(
+    'GET /search/beatmaps returns results for a real title',
+    found.status === 200 && hits.length > 0,
+    `got ${found.status}: ${JSON.stringify(found.body).slice(0, 200)}`
+  );
+
+  ok(
+    'every hit carries what a card needs',
+    hits.length > 0 &&
+      hits.every(
+        (h) =>
+          Number.isFinite(h.difficultyId) &&
+          Number.isFinite(h.beatmapsetId) &&
+          Number.isFinite(h.stars) &&
+          Number.isFinite(h.bpm) &&
+          Number.isFinite(h.lengthSeconds) &&
+          h.difficultyCount >= 1 &&
+          h.title && h.artist && h.mapper && h.difficultyName
+      ),
+    `first hit: ${JSON.stringify(hits[0])}`
+  );
+
+  // Search offers what can be entered. A qualified or graveyard map the submit path
+  // would refuse is a trap rather than a wider search.
+  ok(
+    'no hit has a status the submit path would refuse',
+    hits.every((h) => submittable.includes(h.mapStatus)),
+    `saw ${[...new Set(hits.map((h) => h.mapStatus))].join(', ')}`
+  );
+
+  ok(
+    'hits come back ordered by stars, hardest first',
+    hits.every((h, i) => i === 0 || hits[i - 1].stars >= h.stars),
+    hits.map((h) => h.stars).join(' ')
+  );
+
+  const byBpm = await call('/search/beatmaps?q=souzou&sort=bpm');
+  const bpmHits = Array.isArray(byBpm.body?.results) ? byBpm.body.results : [];
+  ok(
+    'sort=bpm orders by bpm, fastest first',
+    byBpm.status === 200 && bpmHits.every((h, i) => i === 0 || bpmHits[i - 1].bpm >= h.bpm),
+    bpmHits.map((h) => h.bpm).join(' ')
+  );
+
+  const loved = await call('/search/beatmaps?q=love&status=loved');
+  const lovedHits = Array.isArray(loved.body?.results) ? loved.body.results : [];
+  ok(
+    'status=loved returns only loved maps',
+    loved.status === 200 && lovedHits.every((h) => h.mapStatus === 'loved'),
+    `saw ${[...new Set(lovedHits.map((h) => h.mapStatus))].join(', ')}`
+  );
+
+  // The browse state: the page fetches before anyone has typed, and an empty q is how.
+  const browse = await call('/search/beatmaps');
+  ok(
+    'an empty query is a browse, not an error',
+    browse.status === 200 && Array.isArray(browse.body?.results),
+    `got ${browse.status}`
+  );
+
+  const nothing = await call('/search/beatmaps?q=zzzzqqqxxnotarealbeatmapzzz');
+  ok(
+    'a query with no matches is an empty list, not a failure',
+    nothing.status === 200 &&
+      Array.isArray(nothing.body?.results) &&
+      nothing.body.results.length === 0,
+    `got ${nothing.status}: ${JSON.stringify(nothing.body).slice(0, 120)}`
+  );
+
+  const badStatus = await call('/search/beatmaps?status=graveyard');
+  ok('a status the submit path refuses answers 400', badStatus.status === 400, `got ${badStatus.status}`);
+
+  const badSort = await call('/search/beatmaps?sort=nope');
+  ok('an unknown sort answers 400 rather than defaulting', badSort.status === 400, `got ${badSort.status}`);
+}
+
 console.log('\n--- rate limiting ---');
 if (allowWrites) {
   // 25 lookups of the same beatmap: the limit is 20 a minute, so the tail must be 429.

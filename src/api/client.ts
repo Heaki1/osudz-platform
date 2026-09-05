@@ -128,6 +128,29 @@ export interface ApiBeatmapPreview {
 }
 
 /**
+ * One beatmap search hit.
+ *
+ * A hit is a beatmapSET, represented by its hardest difficulty — `difficultyCount` says
+ * how many the set has, so a card can be honest about showing one of several rather
+ * than implying the set is a single map.
+ */
+export interface ApiSearchHit {
+  difficultyId: number;
+  beatmapsetId: number;
+  title: string;
+  artist: string;
+  mapper: string;
+  difficultyName: string;
+  mapStatus: MapStatus;
+  coverUrl: string;
+  previewUrl: string;
+  stars: number;
+  bpm: number;
+  lengthSeconds: number;
+  difficultyCount: number;
+}
+
+/**
  * One player's play on a round's winning beatmap.
  *
  * `qualified` is what the play can be judged on by itself — the required mods, and a
@@ -282,6 +305,23 @@ export const api = {
      */
     importMine: () =>
       send<{ ok: boolean; score: ApiChallengeScore }>("POST", "/challenge/scores"),
+  },
+
+  // ── Search ────────────────────────────────────────────────────────────────────
+  search: {
+    /**
+     * Beatmap search over the osu! API.
+     *
+     * send() rather than get(), against this file's read convention and deliberately:
+     * a search has four failures the page has to tell apart — signed out, rate
+     * limited, osu! unavailable, and simply no matches — and get()'s `null` collapses
+     * all four into the last one, which is the only one that is not an error.
+     */
+    beatmaps: (params: { q: string; status: MapStatus | "any"; sort: "stars" | "bpm" }) =>
+      send<{ results: ApiSearchHit[] }>(
+        "GET",
+        `/search/beatmaps?${new URLSearchParams(params).toString()}`
+      ),
   },
 
   // ── Admin ──────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { REVIEW_PRESENTATION, beatmapUrl, toBeatmap } from './submission';
-import type { ApiSubmission } from '../api/client';
+import { REVIEW_PRESENTATION, beatmapUrl, searchHitToBeatmap, toBeatmap } from './submission';
+import type { ApiSearchHit, ApiSubmission } from '../api/client';
 
 const submission = (over: Partial<ApiSubmission> = {}): ApiSubmission => ({
   id: 7,
@@ -85,5 +85,60 @@ describe('REVIEW_PRESENTATION', () => {
   // still in its submission phase.
   it('presents rejection as changes requested', () => {
     expect(REVIEW_PRESENTATION.rejected.label).toBe('Changes Requested');
+  });
+});
+
+describe('searchHitToBeatmap', () => {
+  const hit = (over: Partial<ApiSearchHit> = {}): ApiSearchHit => ({
+    difficultyId: 4907876,
+    beatmapsetId: 2297621,
+    title: 'Souzou Forest',
+    artist: 'Kano',
+    mapper: 'Kana Arima',
+    difficultyName: 'Expert',
+    mapStatus: 'ranked',
+    coverUrl: 'https://assets.ppy.sh/cover.jpg',
+    previewUrl: 'https://b.ppy.sh/preview/2297621.mp3',
+    stars: 5.67,
+    bpm: 180,
+    lengthSeconds: 246,
+    difficultyCount: 7,
+    ...over,
+  });
+
+  // A search hit is not a submission, and a bare difficulty id sharing a key space with
+  // submission ids is a collision that only shows up once both are on screen.
+  it('prefixes the id so it cannot collide with a submission id', () => {
+    expect(searchHitToBeatmap(hit()).id).toBe('search-4907876');
+  });
+
+  it('formats the raw seconds the way the card expects', () => {
+    expect(searchHitToBeatmap(hit()).length).toBe('4:06');
+    expect(searchHitToBeatmap(hit({ lengthSeconds: 63 })).length).toBe('1:03');
+  });
+
+  it('carries the map status through as the card status', () => {
+    expect(searchHitToBeatmap(hit({ mapStatus: 'loved' })).status).toBe('loved');
+  });
+
+  it('turns an empty preview url into undefined, so no audio element is built', () => {
+    expect(searchHitToBeatmap(hit({ previewUrl: '' })).previewUrl).toBeUndefined();
+  });
+
+  // A search hit carries no round context, and inventing a zero would render a vote bar
+  // on a page that has nothing to vote on.
+  it('leaves the round fields unset', () => {
+    const beatmap = searchHitToBeatmap(hit());
+    expect(beatmap.voteCount).toBeUndefined();
+    expect(beatmap.modRequirement).toBeUndefined();
+    expect(beatmap.submittedByName).toBeUndefined();
+  });
+});
+
+describe('beatmapUrl, for a search hit', () => {
+  it('takes the two ids from any shape that carries them', () => {
+    expect(beatmapUrl({ beatmapsetId: 41823, difficultyId: 131891 })).toBe(
+      'https://osu.ppy.sh/beatmapsets/41823#osu/131891'
+    );
   });
 });
