@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Phase } from '../../types';
 import {
   api,
+  ApiAdminConfig,
   ApiAdminSiteSettings,
   ApiAdminUser,
   ApiAllowedCountry,
@@ -25,7 +26,10 @@ import {
 type AdminTab = 'round' | 'submissions' | 'eligibility' | 'rules' | 'challenge' | 'users' | 'config';
 
 /** Tabs backed by a real endpoint. The rest are still UI only. */
-const WIRED_TABS: AdminTab[] = ['round', 'submissions', 'eligibility', 'users', 'rules', 'challenge'];
+// Every tab is backed by a real endpoint as of C7 phase two, so the WIRED_TABS list and the
+// "this tab is UI only" banner that read from it are both gone: there is nothing left for them
+// to warn about, and a banner that can never render is dead UI of exactly the kind this work
+// has been deleting. docs/todo.txt C7 carries the record of what each tab became.
 
 const TABS: { key: AdminTab; label: string; icon: React.ReactNode }[] = [
   { key: 'round',       label: 'Round Control', icon: <Clock className="w-4 h-4" /> },
@@ -1622,80 +1626,105 @@ function UsersTab() {
 }
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
+//
+// C7 phase two, and the last tab. Read-only, and much smaller than it was.
+//
+// DELETED, decided 2026-09-05: the site name, the "Max Submissions Per User / Round" number,
+// and the maintenance-mode switch. They corresponded to nothing in my_plan.txt or the
+// roadmap, and the max-submissions input was not a setting that exists at all — the server
+// allows exactly one entry per player per round through submissions_one_per_user_per_round,
+// so that field could never have done anything but mislead.
+//
+// The webhook input is gone too, for a different reason: DISCORD_WEBHOOK is a secret and
+// stays a server environment variable. An admin endpoint that accepted one would mean a
+// credential arriving over HTTP and stored somewhere it could be read back. G5 wired the
+// announcements; this reports whether they are switched on.
 
 function ConfigTab() {
-  const [siteName, setSiteName] = useState('osudz.ppy');
-  const [discord,  setDiscord]  = useState('');
-  const [maxSubs,  setMaxSubs]  = useState('1');
-  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [config, setConfig] = useState<ApiAdminConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const c = await api.admin.config();
+      if (c === null) {
+        setError('Could not read the server configuration.');
+        return;
+      }
+      setConfig(c);
+    })();
+  }, []);
+
+  if (error) {
+    return (
+      <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
+        <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+        <p className="text-xs text-rose-300/90">{error}</p>
+      </div>
+    );
+  }
+
+  const rows: { label: string; value: string; tone?: 'good' | 'warn' }[] = config
+    ? [
+        {
+          label: 'Discord announcements',
+          value: config.discordConfigured ? 'Enabled' : 'Not configured — announcements are silent',
+          tone: config.discordConfigured ? 'good' : 'warn',
+        },
+        {
+          label: 'Administrators',
+          value: `${config.adminCount} account${config.adminCount === 1 ? '' : 's'} in ADMIN_OSU_IDS`,
+          tone: config.adminCount > 0 ? 'good' : 'warn',
+        },
+        {
+          label: 'Session cookie',
+          value: config.secureCookies ? 'Secure' : 'Not Secure — development only',
+          tone: config.secureCookies ? 'good' : 'warn',
+        },
+        { label: 'Client origin', value: config.clientOrigin },
+        { label: 'Public base URL', value: config.publicBaseUrl },
+      ]
+    : [];
 
   return (
     <div className="space-y-5">
-      <Section title="Site Settings">
-        <div className="space-y-4">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">Site Name</p>
-            <input
-              type="text"
-              value={siteName}
-              onChange={(e) => setSiteName(e.target.value)}
-              className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none transition-colors"
-            />
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">Max Submissions Per User / Round</p>
-            <input
-              type="number"
-              min="1"
-              max="5"
-              value={maxSubs}
-              onChange={(e) => setMaxSubs(e.target.value)}
-              className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm font-mono text-white focus:outline-none transition-colors"
-            />
-          </div>
-        </div>
-      </Section>
-
-      <Section title="Discord Integration" description="Announce phase changes and winner to a Discord channel.">
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">Webhook URL</p>
-          <input
-            type="password"
-            value={discord}
-            onChange={(e) => setDiscord(e.target.value)}
-            placeholder="https://discord.com/api/webhooks/…"
-            className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors font-mono"
-          />
-        </div>
-        <div className="flex items-center gap-3 mt-2">
-          <div className={`w-2 h-2 rounded-full ${discord ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-          <span className="text-xs text-slate-500">{discord ? 'Webhook configured' : 'No webhook configured'}</span>
-        </div>
-      </Section>
-
-      <Section title="Maintenance Mode" description="Prevents all user actions while admin work is in progress.">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-bold text-white">Enable maintenance mode</p>
-            <p className="text-xs text-slate-500">Users see a maintenance message. Admin access is unaffected.</p>
-          </div>
-          <button type="button" onClick={() => setMaintenanceMode((v) => !v)}>
-            {maintenanceMode
-              ? <ToggleRight className="w-8 h-8 text-rose-400" />
-              : <ToggleLeft  className="w-8 h-8 text-slate-600" />}
-          </button>
-        </div>
-        {maintenanceMode && (
-          <div className="flex items-center gap-2 bg-rose-500/8 border border-rose-500/20 rounded-xl px-4 py-3">
-            <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-            <p className="text-xs text-rose-300">Site is in maintenance mode. All user-facing actions are blocked.</p>
+      <Section
+        title="Server Configuration"
+        description="Read-only. These come from the server environment, not from this page — a webhook and an admin list are credentials, and a page that could set them is a page that could leak them."
+      >
+        {config === null ? (
+          <p className="text-xs text-slate-500">Loading…</p>
+        ) : (
+          <div className="space-y-2">
+            {rows.map(({ label, value, tone }) => (
+              <div
+                key={label}
+                className="flex items-center justify-between gap-4 py-2 border-b border-slate-800/60 last:border-0"
+              >
+                <p className="text-sm text-slate-300">{label}</p>
+                <p
+                  className={`text-xs font-mono text-right ${
+                    tone === 'good' ? 'text-emerald-400' : tone === 'warn' ? 'text-amber-400/90' : 'text-slate-400'
+                  }`}
+                >
+                  {value}
+                </p>
+              </div>
+            ))}
           </div>
         )}
       </Section>
 
-      <button type="button" className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl transition-all">
-        Save Configuration
-      </button>
+      <Section
+        title="Changing these"
+        description="Edit server/.env and restart the API. Admin status is re-derived from ADMIN_OSU_IDS at each login, so granting or revoking it is an env change plus a re-login rather than a database edit."
+      >
+        <p className="text-xs text-slate-500">
+          Everything a round needs is on the other tabs: schedule and phase in Round Control,
+          submission limits in Beatmap Rules, mods and challenge types in Challenge, eligibility
+          in Eligibility and Users.
+        </p>
+      </Section>
     </div>
   );
 }
@@ -1787,14 +1816,6 @@ export function AdminDashboard({ round, user, onRoundChange, onLogin }: AdminDas
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          {!WIRED_TABS.includes(tab) && (
-            <div className="mb-5 flex items-start gap-2.5 bg-amber-400/8 border border-amber-400/20 rounded-xl px-4 py-3">
-              <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-px" />
-              <p className="text-xs text-amber-400/80">
-                This tab is UI only — nothing here is saved yet. The tab list in docs/todo.txt C7 says which item fills each one.
-              </p>
-            </div>
-          )}
           {tab === 'round'       && <RoundControl round={round} onRoundChange={onRoundChange} />}
           {tab === 'submissions' && <SubmissionsTab round={round} onReviewed={onRoundChange} />}
           {tab === 'eligibility' && <EligibilityTab />}

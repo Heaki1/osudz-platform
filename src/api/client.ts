@@ -321,6 +321,21 @@ export interface ApiAdminSiteSettings extends ApiSiteSettings {
   updatedAt: string;
 }
 
+/**
+ * Read-only server configuration, for the admin config tab.
+ *
+ * Booleans and counts, never the values: the Discord webhook and the admin id list are
+ * credentials, and an endpoint that returned them would put a secret on the wire to answer a
+ * question that only needs a yes.
+ */
+export interface ApiAdminConfig {
+  discordConfigured: boolean;
+  clientOrigin: string;
+  publicBaseUrl: string;
+  secureCookies: boolean;
+  adminCount: number;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -511,6 +526,8 @@ export const api = {
         "/admin/round/winner",
         submissionId === undefined ? {} : { submissionId }
       ),
+    /** Read-only server configuration — what is set, never the secrets themselves. */
+    config: () => get<ApiAdminConfig>("/admin/config"),
     /** The submission rules, with who last changed them. */
     settings: () => get<ApiAdminSiteSettings>("/admin/settings"),
     /**

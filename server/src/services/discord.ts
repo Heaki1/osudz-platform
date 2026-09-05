@@ -11,6 +11,13 @@
 
 const WEBHOOK = process.env.DISCORD_WEBHOOK?.trim() ?? '';
 
+/**
+ * Whether announcements will actually go anywhere. Exported as a boolean, never the URL: the
+ * admin config tab needs to know that a webhook is set, and a secret should not travel over
+ * HTTP to answer that.
+ */
+export const isConfigured = (): boolean => WEBHOOK !== '';
+
 /** Whether announcements are configured at all. Exported so callers can skip the work. */
 export const announcementsEnabled = (): boolean => WEBHOOK !== '';
 

@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { requireAdmin } from '../middleware/auth.js';
+import { env } from '../env.js';
 import {
   approveWinner,
   canTransition,
@@ -55,7 +56,12 @@ import {
   setEnabled as setCountryEnabled,
   toApiAllowedCountry,
 } from '../repo/allowedCountries.js';
-import { announceBallotClosed, announcePhase, announceWinner } from '../services/discord.js';
+import {
+  announceBallotClosed,
+  announcePhase,
+  announceWinner,
+  isConfigured,
+} from '../services/discord.js';
 import { listForRound as listVotes, toApiVoteAudit } from '../repo/votes.js';
 import {
   qualifies,
@@ -839,6 +845,29 @@ router.put('/settings', async (req, res) => {
   } catch (err) {
     fail(res, err, 'settings write');
   }
+});
+
+// ── Server configuration, read-only (C7 phase two) ──────────────────────────
+//
+// The config tab used to offer a Discord webhook input, a site name, a
+// "Max Submissions Per User / Round" number, and a maintenance-mode switch, none of which
+// saved anything. Three of those were deleted rather than built (decided 2026-09-05): they
+// correspond to nothing in my_plan.txt or the roadmap, and max-submissions is not a setting
+// that exists at all — submissions_one_per_user_per_round fixes it at one.
+//
+// The webhook stays a server environment variable and is NOT editable here. It is a secret,
+// and an admin endpoint that accepted one would mean a credential arriving over HTTP and
+// being stored somewhere it can be read back. So this reports only whether one is set, which
+// is the thing an administrator actually needs to know.
+
+router.get('/config', (_req, res) => {
+  res.json({
+    discordConfigured: isConfigured(),
+    clientOrigin: env.clientOrigin,
+    publicBaseUrl: env.publicBaseUrl,
+    secureCookies: env.useSecureCookies,
+    adminCount: env.adminOsuIds.length,
+  });
 });
 
 export default router;
