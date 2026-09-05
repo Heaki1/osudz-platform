@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Phase } from '../../types';
 import {
   api,
+  ApiAdminSiteSettings,
   ApiAdminUser,
   ApiAllowedCountry,
   ApiParticipantException,
+  ApiSiteSettings,
   ApiSubmission,
   ApiVoteAudit,
 } from '../../api/client';
@@ -23,7 +25,7 @@ import {
 type AdminTab = 'round' | 'submissions' | 'eligibility' | 'rules' | 'challenge' | 'users' | 'config';
 
 /** Tabs backed by a real endpoint. The rest are still UI only. */
-const WIRED_TABS: AdminTab[] = ['round', 'submissions', 'eligibility', 'users'];
+const WIRED_TABS: AdminTab[] = ['round', 'submissions', 'eligibility', 'users', 'rules', 'challenge'];
 
 const TABS: { key: AdminTab; label: string; icon: React.ReactNode }[] = [
   { key: 'round',       label: 'Round Control', icon: <Clock className="w-4 h-4" /> },
@@ -1022,103 +1024,288 @@ function EligibilityTab() {
   );
 }
 
-// ── BEATMAP RULES ─────────────────────────────────────────────────────────────
+// ── SITE SETTINGS (C8, C9) ────────────────────────────────────────────────────
+//
+// The Beatmap Rules tab and the Challenge tab own different halves of one site_settings row
+// (global, one row — decided 2026-09-05). They share this hook, and the save is a PATCH, so
+// saving the star limits cannot rewrite the mod list with whatever the other tab last
+// rendered.
+
+function useSiteSettings() {
+  const [settings, setSettings] = useState<ApiAdminSiteSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    const rows = await api.admin.settings();
+    if (rows === null) {
+      setError('Could not read the submission rules.');
+      return;
+    }
+    setError(null);
+    setSettings(rows);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async (patch: Partial<ApiSiteSettings>) => {
+    setSaving(true);
+    setSaved(false);
+    const res = await api.admin.saveSettings(patch);
+    setSaving(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError(null);
+    setSettings(res.data.settings);
+    setSaved(true);
+  };
+
+  return { settings, error, saving, saved, save };
+}
+
+/** A bound field: empty means no limit, which is what null is in the table. */
+function BoundInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">{label}</p>
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm font-mono text-white placeholder-slate-600 focus:outline-none transition-colors"
+      />
+    </div>
+  );
+}
+
+/** "3:30" or "210" to seconds. Null for empty (no limit), NaN-free or undefined for junk. */
+function parseLength(text: string): number | null | undefined {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const parts = trimmed.split(':');
+  if (parts.length === 1) {
+    const n = Number(parts[0]);
+    return Number.isInteger(n) && n >= 0 ? n : undefined;
+  }
+  if (parts.length !== 2) return undefined;
+  const m = Number(parts[0]);
+  const s = Number(parts[1]);
+  if (!Number.isInteger(m) || !Number.isInteger(s) || m < 0 || s < 0 || s > 59) return undefined;
+  return m * 60 + s;
+}
+
+/** Empty means no limit. Undefined signals junk the caller should refuse to send. */
+function parseStars(text: string): number | null | undefined {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+const secondsToLength = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+// ── BEATMAP RULES (C8) ────────────────────────────────────────────────────────
+//
+// Wired. This tab rendered star limits, length limits and status toggles with a Save button
+// that did nothing, while the server enforced none of it — a submission could be any star
+// rating or length at all. Both halves are real now: the limits are stored here and checked in
+// POST /api/submissions AND in the lookup preview, so a player is told before they choose a
+// mod rather than after.
 
 function BeatmapRulesTab() {
-  const [starMin, setStarMin] = useState('3.00');
-  const [starMax, setStarMax] = useState('9.00');
-  const [lenMin,  setLenMin]  = useState('0:30');
-  const [lenMax,  setLenMax]  = useState('5:00');
-  const [statuses, setStatuses] = useState({ ranked: true, loved: true, approved: true });
+  const { settings, error, saving, saved, save } = useSiteSettings();
 
-  const toggleStatus = (k: keyof typeof statuses) =>
-    setStatuses((prev) => ({ ...prev, [k]: !prev[k] }));
+  const [starMin, setStarMin] = useState('');
+  const [starMax, setStarMax] = useState('');
+  const [lenMin, setLenMin] = useState('');
+  const [lenMax, setLenMax] = useState('');
+  const [statuses, setStatuses] = useState<string[]>([]);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  // Seeded from the row once it arrives, rather than from a hardcoded default: the inputs used
+  // to open on 3.00 / 9.00, which was a limit nothing enforced and nobody had set.
+  useEffect(() => {
+    if (!settings) return;
+    setStarMin(settings.minStars === null ? '' : settings.minStars.toFixed(2));
+    setStarMax(settings.maxStars === null ? '' : settings.maxStars.toFixed(2));
+    setLenMin(settings.minLengthSeconds === null ? '' : secondsToLength(settings.minLengthSeconds));
+    setLenMax(settings.maxLengthSeconds === null ? '' : secondsToLength(settings.maxLengthSeconds));
+    setStatuses(settings.allowedStatuses);
+  }, [settings]);
+
+  const toggleStatus = (key: string) =>
+    setStatuses((prev) => (prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]));
+
+  const handleSave = async () => {
+    const minStars = parseStars(starMin);
+    const maxStars = parseStars(starMax);
+    const minLengthSeconds = parseLength(lenMin);
+    const maxLengthSeconds = parseLength(lenMax);
+
+    if (minStars === undefined || maxStars === undefined) {
+      setLocalError('Star limits must be a number, or empty for no limit.');
+      return;
+    }
+    if (minLengthSeconds === undefined || maxLengthSeconds === undefined) {
+      setLocalError('Lengths must be m:ss or a number of seconds, or empty for no limit.');
+      return;
+    }
+    if (statuses.length === 0) {
+      setLocalError('Allow at least one beatmap status, or nothing can be submitted at all.');
+      return;
+    }
+    setLocalError(null);
+    await save({ minStars, maxStars, minLengthSeconds, maxLengthSeconds, allowedStatuses: statuses });
+  };
 
   return (
     <div className="space-y-5">
-      <Section title="Star Rating Range" description="Submitted beatmaps must fall within this range.">
+      {(error || localError) && (
+        <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+          <p className="text-xs text-rose-300/90">{localError ?? error}</p>
+        </div>
+      )}
+
+      <Section
+        title="Star Rating Range"
+        description="Submitted beatmaps must fall within this range. Leave a field empty for no limit."
+      >
         <div className="grid grid-cols-2 gap-4">
-          {[
-            { label: 'Minimum ★', val: starMin, set: setStarMin },
-            { label: 'Maximum ★', val: starMax, set: setStarMax },
-          ].map(({ label, val, set }) => (
-            <div key={label}>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">{label}</p>
-              <input
-                type="text"
-                value={val}
-                onChange={(e) => set(e.target.value)}
-                className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm font-mono text-white focus:outline-none transition-colors"
-              />
-            </div>
-          ))}
+          <BoundInput label="Minimum ★" value={starMin} placeholder="no minimum" onChange={setStarMin} />
+          <BoundInput label="Maximum ★" value={starMax} placeholder="no maximum" onChange={setStarMax} />
         </div>
       </Section>
 
-      <Section title="Length Range" description="Drain time of the beatmap must fall within this range.">
+      <Section
+        title="Length Range"
+        description="Total length of the difficulty, as m:ss or seconds. Empty means no limit."
+      >
         <div className="grid grid-cols-2 gap-4">
-          {[
-            { label: 'Minimum (m:ss)', val: lenMin, set: setLenMin },
-            { label: 'Maximum (m:ss)', val: lenMax, set: setLenMax },
-          ].map(({ label, val, set }) => (
-            <div key={label}>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-mono">{label}</p>
-              <input
-                type="text"
-                value={val}
-                onChange={(e) => set(e.target.value)}
-                className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm font-mono text-white focus:outline-none transition-colors"
-              />
-            </div>
-          ))}
+          <BoundInput label="Minimum" value={lenMin} placeholder="no minimum" onChange={setLenMin} />
+          <BoundInput label="Maximum" value={lenMax} placeholder="no maximum" onChange={setLenMax} />
         </div>
       </Section>
 
-      <Section title="Allowed Beatmap Statuses">
-        <div className="flex gap-3 flex-wrap">
-          {(Object.keys(statuses) as (keyof typeof statuses)[]).map((s) => (
+      <Section
+        title="Allowed Statuses"
+        description="Only these osu! statuses may be submitted. Narrowing only — the schema does not accept anything beyond these three."
+      >
+        <div className="flex flex-wrap gap-2">
+          {['ranked', 'loved', 'approved'].map((key) => (
             <button
-              key={s}
+              key={key}
               type="button"
-              onClick={() => toggleStatus(s)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-bold transition-all capitalize ${
-                statuses[s]
-                  ? s === 'ranked'   ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
-                  : s === 'loved'    ? 'bg-rose-500/15 border-rose-500/40 text-rose-400'
-                  :                   'bg-blue-500/15 border-blue-500/40 text-blue-400'
-                  : 'bg-slate-900/40 border-slate-700 text-slate-600'
+              onClick={() => toggleStatus(key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize border transition-all ${
+                statuses.includes(key)
+                  ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-400'
+                  : 'bg-slate-900/50 border-slate-700/60 text-slate-600 hover:text-slate-400'
               }`}
             >
-              {statuses[s] ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-              {s}
+              {key}
             </button>
           ))}
         </div>
       </Section>
 
-      <button type="button" className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl transition-all">
-        Save Rules
-      </button>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving || settings === null}
+          className="px-6 py-2.5 bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-slate-950 text-sm font-black rounded-xl transition-all"
+        >
+          {saving ? 'Saving…' : 'Save Rules'}
+        </button>
+        {saved && <p className="text-xs text-emerald-400">Saved. New submissions are checked against these.</p>}
+      </div>
     </div>
   );
 }
 
-// ── CHALLENGE SETUP ───────────────────────────────────────────────────────────
+// ── CHALLENGE SETUP (C9) ──────────────────────────────────────────────────────
+//
+// Wired. The mod list and the challenge-type list used to be hardcoded here, hardcoded again
+// in server/src/repo/submissions.ts, and hardcoded a third time on the submit page — three
+// copies, and editing this one saved nothing. All three now read site_settings.
+//
+// The bounty textarea is gone: E4 made the prize a per-round field set when a round is opened,
+// so a second place to type it that saved nothing was a duplicate of a control that works.
 
+/** The full mod set an administrator picks from. Editing beyond this is not asked for. */
 const ALL_MODS = ['NM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'];
 
+/**
+ * Challenge types whose NAME carries behaviour. repo/challengeScores.ts switches on these
+ * strings in qualifies() and orderFor(), so renaming one silently stops it being judged — the
+ * tab warns rather than refuses, because adding a new type is exactly what my_plan.txt asks
+ * for and only these four are load-bearing.
+ */
+const JUDGED_TYPES = ['Full Combo', 'Top #1 Score', 'Best Accuracy', 'Lowest Miss Count'];
+
 function ChallengeTab() {
-  const [enabledMods, setEnabledMods] = useState<string[]>(['NM', 'HD', 'HR', 'DT', 'HDHR', 'HDDT']);
-  const [types, setTypes] = useState(['Full Combo', 'Top #1 Score', 'Best Accuracy', 'Lowest Miss Count']);
+  const { settings, error, saving, saved, save } = useSiteSettings();
+
+  const [mods, setMods] = useState<string[]>([]);
+  const [types, setTypes] = useState<string[]>([]);
   const [newType, setNewType] = useState('');
-  const [bounty, setBounty] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!settings) return;
+    setMods(settings.allowedMods);
+    setTypes(settings.allowedChallengeTypes);
+  }, [settings]);
 
   const toggleMod = (m: string) =>
-    setEnabledMods((prev) => prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]);
+    setMods((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
+
+  const addType = () => {
+    const name = newType.trim();
+    if (name === '' || types.includes(name)) return;
+    setTypes((prev) => [...prev, name]);
+    setNewType('');
+  };
+
+  const handleSave = async () => {
+    if (mods.length === 0 || types.length === 0) {
+      setLocalError('Keep at least one mod and one challenge type, or nothing can be submitted.');
+      return;
+    }
+    setLocalError(null);
+    await save({ allowedMods: mods, allowedChallengeTypes: types });
+  };
+
+  const droppedJudged = JUDGED_TYPES.filter((t) => !types.includes(t));
 
   return (
     <div className="space-y-5">
-      <Section title="Allowed Mods" description="Players can choose from these mods when submitting a beatmap.">
+      {(error || localError) && (
+        <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+          <p className="text-xs text-rose-300/90">{localError ?? error}</p>
+        </div>
+      )}
+
+      <Section title="Allowed Mods" description="Players choose from these when submitting a beatmap.">
         <div className="flex flex-wrap gap-2">
           {ALL_MODS.map((m) => (
             <button
@@ -1126,7 +1313,7 @@ function ChallengeTab() {
               type="button"
               onClick={() => toggleMod(m)}
               className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition-all ${
-                enabledMods.includes(m)
+                mods.includes(m)
                   ? 'bg-indigo-500/25 border-indigo-500/50 text-indigo-200'
                   : 'bg-slate-900/50 border-slate-700/60 text-slate-600 hover:text-slate-400'
               }`}
@@ -1137,12 +1324,24 @@ function ChallengeTab() {
         </div>
       </Section>
 
-      <Section title="Challenge Types" description="The types of challenges that can be chosen when submitting.">
+      <Section title="Challenge Types" description="The requirement a submitter picks alongside the mod.">
         <div className="space-y-2">
           {types.map((t) => (
-            <div key={t} className="flex items-center justify-between bg-slate-900/40 border border-slate-800 rounded-xl px-4 py-2.5">
-              <span className="text-sm text-white">{t}</span>
-              <button type="button" onClick={() => setTypes((prev) => prev.filter((x) => x !== t))} className="text-slate-600 hover:text-rose-400 transition-colors">
+            <div
+              key={t}
+              className="flex items-center justify-between bg-slate-900/40 border border-slate-800 rounded-xl px-4 py-2.5"
+            >
+              <span className="text-sm text-white">
+                {t}
+                {JUDGED_TYPES.includes(t) && (
+                  <span className="ml-2 text-[10px] font-mono text-slate-600">judged</span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setTypes((prev) => prev.filter((x) => x !== t))}
+                className="text-slate-600 hover:text-rose-400 transition-colors"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1155,36 +1354,44 @@ function ChallengeTab() {
             value={newType}
             onChange={(e) => setNewType(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && newType.trim()) {
-                setTypes((prev) => [...prev, newType.trim()]);
-                setNewType('');
-              }
+              if (e.key === 'Enter') addType();
             }}
             className="flex-1 bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors"
           />
           <button
             type="button"
-            onClick={() => { if (newType.trim()) { setTypes((prev) => [...prev, newType.trim()]); setNewType(''); } }}
+            onClick={addType}
             className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl transition-all"
           >
             <Plus className="w-3.5 h-3.5" />
             Add
           </button>
         </div>
+        <p className="text-[11px] text-slate-500">
+          A type marked <span className="font-mono text-slate-400">judged</span> is one the
+          leaderboard understands — qualification and ordering are computed from its name. A new
+          type is offered to submitters and stored on their entry, but the leaderboard falls back
+          to score order for it.
+        </p>
+        {droppedJudged.length > 0 && (
+          <p className="text-[11px] text-amber-400/80">
+            Removing {droppedJudged.join(', ')} leaves rounds that already used it intact — their
+            leaderboards still order by it. It only stops being offered on new submissions.
+          </p>
+        )}
       </Section>
 
-      <Section title="Monthly Bounty Description" description="Shown on the challenge page header. Markdown not supported.">
-        <textarea
-          value={bounty}
-          onChange={(e) => setBounty(e.target.value)}
-          placeholder="Describe the challenge bounty, special rules, or prizes for this round…"
-          rows={4}
-          className="w-full bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors resize-none"
-        />
-        <button type="button" className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl transition-all">
-          Save Challenge Settings
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving || settings === null}
+          className="px-6 py-2.5 bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-slate-950 text-sm font-black rounded-xl transition-all"
+        >
+          {saving ? 'Saving…' : 'Save Challenge Options'}
         </button>
-      </Section>
+        {saved && <p className="text-xs text-emerald-400">Saved.</p>}
+      </div>
     </div>
   );
 }

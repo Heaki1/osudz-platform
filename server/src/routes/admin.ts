@@ -42,6 +42,12 @@ import {
 } from '../repo/participantPermissions.js';
 import { enabledSet } from '../repo/allowedCountries.js';
 import {
+  CONFIGURABLE_STATUSES,
+  settings,
+  update,
+  type SiteSettingsPatch,
+} from '../repo/siteSettings.js';
+import {
   isCountryCode,
   listAll as listCountries,
   normalise as normaliseCountry,
@@ -705,5 +711,136 @@ router.delete('/participants/:userId', async (req, res) => {
   }
 });
 
+// ── Submission rules (C8) and the mod / challenge-type lists (C9) ────────────
+//
+// One global row, id = 1 (decided 2026-09-05). The `rules` tab owns the star, length and
+// status half; the `challenge` tab owns the two lists. Both PUT the same endpoint, and the
+// write is a PATCH so saving one tab cannot silently rewrite the other's fields with whatever
+// it last rendered.
+
+/** numeric(4,2) holds up to 99.99, and no osu! beatmap is anywhere near that. */
+const MAX_STARS = 99.99;
+/** Ten hours. A bound so a typo cannot store a length no beatmap could ever satisfy. */
+const MAX_LENGTH_SECONDS = 36_000;
+
+/** A nullable bound: absent leaves it alone, null clears it, a number sets it. */
+function readBound(
+  value: unknown,
+  max: number,
+  integer: boolean
+): number | null | undefined | 'invalid' {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > max) return 'invalid';
+  if (integer && !Number.isInteger(n)) return 'invalid';
+  return n;
+}
+
+/** A list of distinct non-empty labels, or null when the caller sent something unusable. */
+function readList(value: unknown, max: number): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const cleaned = value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter((item) => item !== '' && item.length <= 48);
+  if (cleaned.length !== value.length || cleaned.length === 0 || cleaned.length > max) return null;
+  return [...new Set(cleaned)];
+}
+
+router.get('/settings', async (_req, res) => {
+  try {
+    res.json(await settings());
+  } catch (err) {
+    fail(res, err, 'settings read');
+  }
+});
+
+router.put('/settings', async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const patch: SiteSettingsPatch = {};
+
+  const bounds: [keyof SiteSettingsPatch, unknown, number, boolean][] = [
+    ['minStars', body.minStars, MAX_STARS, false],
+    ['maxStars', body.maxStars, MAX_STARS, false],
+    ['minLengthSeconds', body.minLengthSeconds, MAX_LENGTH_SECONDS, true],
+    ['maxLengthSeconds', body.maxLengthSeconds, MAX_LENGTH_SECONDS, true],
+  ];
+  for (const [key, raw, max, integer] of bounds) {
+    const read = readBound(raw, max, integer);
+    if (read === 'invalid') {
+      res.status(400).json({ error: `${key} must be a number between 0 and ${max}, or null` });
+      return;
+    }
+    if (read !== undefined) (patch as Record<string, unknown>)[key] = read;
+  }
+
+  const lists: [keyof SiteSettingsPatch, unknown, number, string][] = [
+    ['allowedStatuses', body.allowedStatuses, 8, 'status'],
+    ['allowedMods', body.allowedMods, 32, 'mod'],
+    ['allowedChallengeTypes', body.allowedChallengeTypes, 32, 'challenge type'],
+  ];
+  for (const [key, raw, max, label] of lists) {
+    if (raw === undefined) continue;
+    const read = readList(raw, max);
+    if (read === null) {
+      res.status(400).json({ error: `${key} must be a list of 1 to ${max} distinct ${label} names` });
+      return;
+    }
+    (patch as Record<string, unknown>)[key] = read;
+  }
+
+  // Narrowing only. Widening past SUBMITTABLE_STATUSES would need the
+  // submissions_map_status_valid CHECK changed too, so the insert would refuse a row the
+  // lookup had already accepted — a rule that contradicts itself between two requests.
+  if (patch.allowedStatuses) {
+    const unknown = patch.allowedStatuses.filter(
+      (s) => !(CONFIGURABLE_STATUSES as readonly string[]).includes(s)
+    );
+    if (unknown.length > 0) {
+      res.status(400).json({
+        error: `Only ${CONFIGURABLE_STATUSES.join(', ')} can be allowed. Unknown: ${unknown.join(', ')}`,
+      });
+      return;
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    res.status(400).json({ error: 'Nothing to change' });
+    return;
+  }
+
+  // requireAdmin guarantees req.user, but the type does not know that.
+  const admin = req.user;
+  if (!admin) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  try {
+    const current = await settings();
+    const minStars = patch.minStars !== undefined ? patch.minStars : current.minStars;
+    const maxStars = patch.maxStars !== undefined ? patch.maxStars : current.maxStars;
+    const minLen = patch.minLengthSeconds !== undefined ? patch.minLengthSeconds : current.minLengthSeconds;
+    const maxLen = patch.maxLengthSeconds !== undefined ? patch.maxLengthSeconds : current.maxLengthSeconds;
+
+    // Checked against the MERGED row, not against the patch: sending only a new minimum can
+    // still cross a maximum that was already stored, and the result would be a range no
+    // beatmap can satisfy with no obvious cause.
+    if (minStars !== null && maxStars !== null && minStars > maxStars) {
+      res.status(400).json({ error: 'The minimum star rating cannot be above the maximum' });
+      return;
+    }
+    if (minLen !== null && maxLen !== null && minLen > maxLen) {
+      res.status(400).json({ error: 'The minimum length cannot be above the maximum' });
+      return;
+    }
+
+    res.json({ ok: true, settings: await update(patch, admin.id) });
+  } catch (err) {
+    fail(res, err, 'settings write');
+  }
+});
+
 export default router;
+
 

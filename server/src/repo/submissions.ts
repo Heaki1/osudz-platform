@@ -16,12 +16,20 @@ export const REVIEW_DECISIONS = ['approved', 'rejected'] as const;
 export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
 
 /**
- * Allowed challenge requirements. docs/my_plan.txt calls for these to be
- * administrator-defined; until that lands they live here as the single source of
- * truth, and src/components/platform/PlatformSubmitPage.tsx mirrors them.
+ * The mod and challenge-requirement lists that SEEDED site_settings (C9).
+ *
+ * These are no longer the rule. routes/submissions.ts validates against
+ * site_settings.allowed_mods and .allowed_challenge_types, which an administrator edits, and
+ * migration 011 seeded those columns from exactly these values so nothing changed on the day
+ * the store landed.
+ *
+ * Kept because repo/challengeScores.ts judges challenge types BY NAME — qualifies() and
+ * orderFor() switch on these strings — so they document which names carry behaviour. Renaming
+ * one in the admin tab is not only a settings change, and this is where to look to find out
+ * why.
  */
-export const ALLOWED_MODS = ['NM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'] as const;
-export const ALLOWED_CHALLENGE_TYPES = [
+export const SEEDED_MODS = ['NM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'] as const;
+export const SEEDED_CHALLENGE_TYPES = [
   'Full Combo',
   'Top #1 Score',
   'Best Accuracy',

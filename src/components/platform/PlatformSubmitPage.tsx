@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Beatmap, PlatformPage } from '../../types';
-import { api, ApiBeatmapPreview, ApiSubmission } from '../../api/client';
+import { ApiSiteSettings, api, ApiBeatmapPreview, ApiSubmission } from '../../api/client';
 import { CurrentRound, pageAccess, roundLabel } from '../../lib/round';
 import { beatmapUrl, previewToBeatmap, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
@@ -14,7 +14,25 @@ import {
 
 // ── ELIGIBILITY RULES PANEL ───────────────────────────────────────────────────
 
-function EligibilityPanel() {
+/** "0:30" from raw seconds, matching how the server phrases a length refusal. */
+const formatSeconds = (seconds: number): string =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** A bound pair as one line, or "Any" when the administrator has set neither (C8). */
+function boundLabel(
+  min: number | null,
+  max: number | null,
+  format: (n: number) => string
+): string {
+  if (min === null && max === null) return 'Any';
+  if (min !== null && max === null) return `${format(min)} or more`;
+  if (min === null && max !== null) return `up to ${format(max)}`;
+  return `${format(min!)} — ${format(max!)}`;
+}
+
+function EligibilityPanel({ settings }: { settings: ApiSiteSettings | null }) {
   const [open, setOpen] = useState(true);
   return (
     <div className="bg-[#0d1526] border border-slate-800 rounded-2xl mb-6 overflow-hidden">
@@ -36,10 +54,24 @@ function EligibilityPanel() {
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
-              { icon: <CheckCircle2 className="w-4 h-4 text-emerald-400" />, label: 'Beatmap status', value: 'Ranked, Loved, or Approved' },
-              { icon: <Star className="w-4 h-4 text-amber-400" />,           label: 'Star rating',    value: '3.00★ — 9.00★' },
-              { icon: <Clock className="w-4 h-4 text-blue-400" />,           label: 'Length',         value: '0:30 — 5:00' },
-              { icon: <CheckCircle2 className="w-4 h-4 text-emerald-400" />, label: 'Per player',     value: '1 submission per round' },
+              {
+                icon: <CheckCircle2 className="w-4 h-4 text-emerald-400" />,
+                label: 'Beatmap status',
+                // The real list, not a hardcoded "Ranked, Loved, or Approved": an
+                // administrator can narrow it, and this used to say otherwise (C8).
+                value: settings ? settings.allowedStatuses.map(titleCase).join(', ') || 'None' : '…',
+              },
+              {
+                icon: <Star className="w-4 h-4 text-amber-400" />,
+                label: 'Star rating',
+                value: settings ? boundLabel(settings.minStars, settings.maxStars, (n) => `${n.toFixed(2)}★`) : '…',
+              },
+              {
+                icon: <Clock className="w-4 h-4 text-blue-400" />,
+                label: 'Length',
+                value: settings ? boundLabel(settings.minLengthSeconds, settings.maxLengthSeconds, formatSeconds) : '…',
+              },
+              { icon: <CheckCircle2 className="w-4 h-4 text-emerald-400" />, label: 'Per player', value: '1 submission per round' },
             ].map(({ icon, label, value }) => (
               <div key={label} className="flex items-center gap-3 bg-slate-900/50 border border-slate-800 rounded-xl px-3 py-2.5">
                 {icon}
@@ -58,20 +90,22 @@ function EligibilityPanel() {
 
 // ── MOD + CHALLENGE REQUIREMENT SELECTORS ────────────────────────────────────
 
-// Must stay in step with ALLOWED_MODS / ALLOWED_CHALLENGE_TYPES in
-// server/src/repo/submissions.ts, which validates what is sent. Making these
-// administrator-defined is specified in docs/my_plan.txt but not built yet.
-const MODS = ['NM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'];
-const CHALLENGE_TYPES = ['Full Combo', 'Top #1 Score', 'Best Accuracy', 'Lowest Miss Count'];
+// The two lists come from GET /api/settings now (C9), which is the same row the server
+// validates a submission against. They used to be hardcoded here and in
+// server/src/repo/submissions.ts — two copies of the same list, and the admin `challenge` tab
+// rendered a third that saved nothing.
 
 interface RequirementsProps {
   mod: string | null;
   challengeType: string | null;
   onModChange: (m: string | null) => void;
   onTypeChange: (t: string | null) => void;
+  settings: ApiSiteSettings | null;
 }
 
-function RequirementsSelector({ mod, challengeType, onModChange, onTypeChange }: RequirementsProps) {
+function RequirementsSelector({ mod, challengeType, onModChange, onTypeChange, settings }: RequirementsProps) {
+  const MODS = settings?.allowedMods ?? [];
+  const CHALLENGE_TYPES = settings?.allowedChallengeTypes ?? [];
   return (
     <div className="space-y-5">
       {/* Mod */}
@@ -122,7 +156,13 @@ function RequirementsSelector({ mod, challengeType, onModChange, onTypeChange }:
 
 // ── URL TAB ───────────────────────────────────────────────────────────────────
 
-function UrlTab({ onSubmitted }: { onSubmitted: (submission: ApiSubmission) => void }) {
+function UrlTab({
+  onSubmitted,
+  settings,
+}: {
+  onSubmitted: (submission: ApiSubmission) => void;
+  settings: ApiSiteSettings | null;
+}) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -220,6 +260,7 @@ function UrlTab({ onSubmitted }: { onSubmitted: (submission: ApiSubmission) => v
             challengeType={challengeType}
             onModChange={setMod}
             onTypeChange={setChallengeType}
+            settings={settings}
           />
 
           <button
@@ -247,6 +288,8 @@ interface FavoritesTabProps {
   favorites: Beatmap[];
   onFavorite: (map: Beatmap) => void;
   onSubmitted: (submission: ApiSubmission) => void;
+  /** The administrator-defined rules, for the mod and challenge-type lists (C9). */
+  settings: ApiSiteSettings | null;
 }
 
 /**
@@ -258,7 +301,7 @@ interface FavoritesTabProps {
  * api.submissions.submit the URL tab uses, so the two paths cannot disagree about what a
  * submission is.
  */
-function FavoritesTab({ favorites, onFavorite, onSubmitted }: FavoritesTabProps) {
+function FavoritesTab({ favorites, onFavorite, onSubmitted, settings }: FavoritesTabProps) {
   const [selected, setSelected] = useState<Beatmap | null>(null);
   const [mod, setMod] = useState<string | null>(null);
   const [challengeType, setChallengeType] = useState<string | null>(null);
@@ -315,6 +358,7 @@ function FavoritesTab({ favorites, onFavorite, onSubmitted }: FavoritesTabProps)
           challengeType={challengeType}
           onModChange={setMod}
           onTypeChange={setChallengeType}
+          settings={settings}
         />
         {error && (
           <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
@@ -484,6 +528,8 @@ interface PlatformSubmitPageProps {
   favorites: Beatmap[];
   /** Takes the map, not its id: favoriting addresses the osu! beatmap (A4). */
   onFavorite: (map: Beatmap) => void;
+  /** The administrator-defined submission rules (C8, C9). Null until the first read. */
+  settings: ApiSiteSettings | null;
   loading: boolean;
   onSubmitted: (submission: ApiSubmission) => void;
   /** Resolves to an error message, or null once the entry is withdrawn. */
@@ -497,6 +543,7 @@ export function PlatformSubmitPage({
   round,
   favorites,
   onFavorite,
+  settings,
   mySubmission,
   loading,
   onSubmitted,
@@ -539,7 +586,7 @@ export function PlatformSubmitPage({
         <MySubmission submission={mySubmission} onWithdraw={onWithdraw} />
       ) : (
         <>
-          <EligibilityPanel />
+          <EligibilityPanel settings={settings} />
 
           {/* Tabs */}
           <div className="flex gap-1 mb-8 p-1 bg-slate-900/60 border border-slate-800 rounded-xl w-fit">
@@ -569,9 +616,14 @@ export function PlatformSubmitPage({
             </button>
           </div>
 
-          {tab === 'url'       && <UrlTab onSubmitted={onSubmitted} />}
+          {tab === 'url'       && <UrlTab onSubmitted={onSubmitted} settings={settings} />}
           {tab === 'favorites' && (
-            <FavoritesTab favorites={favorites} onFavorite={onFavorite} onSubmitted={onSubmitted} />
+            <FavoritesTab
+              favorites={favorites}
+              onFavorite={onFavorite}
+              onSubmitted={onSubmitted}
+              settings={settings}
+            />
           )}
         </>
       )}

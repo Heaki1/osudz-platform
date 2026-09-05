@@ -11,9 +11,8 @@ import type { Response } from 'express';
 import { requireAuth, requireCanSubmit } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { findCurrent } from '../repo/rounds.js';
+import { checkBeatmapRules, settings } from '../repo/siteSettings.js';
 import {
-  ALLOWED_CHALLENGE_TYPES,
-  ALLOWED_MODS,
   create,
   findById,
   findByUserAndRound,
@@ -144,7 +143,18 @@ router.post('/lookup', requireCanSubmit, lookupLimit, async (req, res) => {
   }
 
   try {
-    res.json(await fetchBeatmap(difficultyId));
+    const beatmap = await fetchBeatmap(difficultyId);
+
+    // The administrator's rules are checked HERE as well as on submit (C8), so a player is
+    // told before they pick a mod and a challenge requirement rather than after. 422 is the
+    // same answer an unsubmittable status already gets, since this is the same kind of no.
+    const broken = checkBeatmapRules(beatmap, await settings());
+    if (broken !== null) {
+      res.status(422).json({ error: broken });
+      return;
+    }
+
+    res.json(beatmap);
   } catch (err) {
     beatmapError(res, err, 'lookup');
   }
@@ -167,21 +177,27 @@ router.post('/', requireCanSubmit, submitLimit, async (req, res) => {
   }
 
   const { modRequirement, challengeRequirement } = body;
-  if (typeof modRequirement !== 'string' || !(ALLOWED_MODS as readonly string[]).includes(modRequirement)) {
-    res.status(400).json({ error: `modRequirement must be one of ${ALLOWED_MODS.join(', ')}` });
-    return;
-  }
-  if (
-    typeof challengeRequirement !== 'string' ||
-    !(ALLOWED_CHALLENGE_TYPES as readonly string[]).includes(challengeRequirement)
-  ) {
-    res.status(400).json({
-      error: `challengeRequirement must be one of ${ALLOWED_CHALLENGE_TYPES.join(', ')}`,
-    });
+  if (typeof modRequirement !== 'string' || typeof challengeRequirement !== 'string') {
+    res.status(400).json({ error: 'modRequirement and challengeRequirement are required' });
     return;
   }
 
   try {
+    // C9: both lists are administrator-defined now, so they are validated against the store
+    // rather than against the constants this file used to own — which the admin `challenge`
+    // tab also duplicated by hand, giving two copies of the same list, one of them a lie.
+    const rules = await settings();
+    if (!rules.allowedMods.includes(modRequirement)) {
+      res.status(400).json({ error: `modRequirement must be one of ${rules.allowedMods.join(', ')}` });
+      return;
+    }
+    if (!rules.allowedChallengeTypes.includes(challengeRequirement)) {
+      res.status(400).json({
+        error: `challengeRequirement must be one of ${rules.allowedChallengeTypes.join(', ')}`,
+      });
+      return;
+    }
+
     const round = await findCurrent();
     if (!round) {
       res.status(409).json({ error: 'No round is open' });
@@ -213,6 +229,14 @@ router.post('/', requireCanSubmit, submitLimit, async (req, res) => {
       beatmap = await fetchBeatmap(difficultyId);
     } catch (err) {
       beatmapError(res, err, 'submit lookup');
+      return;
+    }
+
+    // Re-checked here rather than trusted from the preview (C8). The lookup is a courtesy;
+    // this is the gate, and a caller can reach this route without ever calling that one.
+    const broken = checkBeatmapRules(beatmap, rules);
+    if (broken !== null) {
+      res.status(422).json({ error: broken });
       return;
     }
 

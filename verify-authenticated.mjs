@@ -603,6 +603,89 @@ if (allowWrites) {
   skipped('the osu! favorites import', 'it writes favorites — pass --allow-writes');
 }
 
+console.log('');
+console.log('--- submission rules (C8) and the requirement lists (C9) ---');
+{
+  const publicRules = await call('/settings');
+  ok(
+    'GET /settings is public and carries the rules',
+    publicRules.status === 200 &&
+      Array.isArray(publicRules.body?.allowedStatuses) &&
+      Array.isArray(publicRules.body?.allowedMods) &&
+      Array.isArray(publicRules.body?.allowedChallengeTypes),
+    `got ${publicRules.status}: ${JSON.stringify(publicRules.body).slice(0, 200)}`
+  );
+  ok(
+    'the public read carries no administrative detail',
+    publicRules.body?.updatedBy === undefined && publicRules.body?.updatedAt === undefined,
+    JSON.stringify(Object.keys(publicRules.body ?? {}))
+  );
+
+  const admin = await call('/admin/settings');
+  if (admin.status === 403) {
+    skipped('the settings write checks', 'this session is not an administrator');
+  } else {
+    ok('GET /admin/settings adds who last changed them', admin.status === 200 && 'updatedAt' in (admin.body ?? {}), `got ${admin.status}`);
+
+    const badStars = await call('/admin/settings', { method: 'PUT', body: JSON.stringify({ minStars: 'hard' }) });
+    ok('a non-numeric star bound answers 400', badStars.status === 400, `got ${badStars.status}`);
+
+    // Widening past the three statuses the schema CHECK allows would let the lookup accept a
+    // beatmap the insert then refuses — a rule that contradicts itself between two requests.
+    const badStatus = await call('/admin/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ allowedStatuses: ['ranked', 'graveyard'] }),
+    });
+    ok('a status the schema cannot store answers 400', badStatus.status === 400, `got ${badStatus.status}`);
+
+    const emptyList = await call('/admin/settings', { method: 'PUT', body: JSON.stringify({ allowedMods: [] }) });
+    ok('an empty mod list answers 400', emptyList.status === 400, `got ${emptyList.status}`);
+
+    const nothing = await call('/admin/settings', { method: 'PUT', body: JSON.stringify({}) });
+    ok('a patch with no fields answers 400', nothing.status === 400, `got ${nothing.status}`);
+
+    if (allowWrites) {
+      const before = admin.body;
+      // Crossed bounds are checked against the MERGED row, so sending only a minimum still
+      // catches a maximum that was already stored.
+      const set = await call('/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ minStars: 2, maxStars: 8, minLengthSeconds: 30, maxLengthSeconds: 600 }),
+      });
+      ok('saving the star and length bounds succeeds', set.status === 200, `got ${set.status}`);
+
+      const crossed = await call('/admin/settings', { method: 'PUT', body: JSON.stringify({ minStars: 9 }) });
+      ok(
+        'a minimum above the stored maximum answers 400',
+        crossed.status === 400,
+        `got ${crossed.status}: ${JSON.stringify(crossed.body)}`
+      );
+
+      // The rule has to bite on the lookup, which is the whole point of checking it there.
+      const tooEasy = await call('/submissions/lookup', { method: 'POST', body: JSON.stringify({ url: '75' }) });
+      ok(
+        'the lookup refuses a beatmap outside the rules with a readable reason',
+        tooEasy.status === 422 && typeof tooEasy.body?.error === 'string',
+        `got ${tooEasy.status}: ${JSON.stringify(tooEasy.body)}`
+      );
+
+      const restored = await call('/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          minStars: before?.minStars ?? null,
+          maxStars: before?.maxStars ?? null,
+          minLengthSeconds: before?.minLengthSeconds ?? null,
+          maxLengthSeconds: before?.maxLengthSeconds ?? null,
+          allowedStatuses: before?.allowedStatuses ?? ['ranked', 'loved', 'approved'],
+        }),
+      });
+      ok('the rules are restored to what they were', restored.status === 200, `got ${restored.status}`);
+    } else {
+      skipped('the rule round trip', 'it writes the submission rules — pass --allow-writes');
+    }
+  }
+}
+
 console.log('\n--- rate limiting ---');
 if (allowWrites) {
   // 25 lookups of the same beatmap: the limit is 20 a minute, so the tail must be 429.

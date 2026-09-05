@@ -298,6 +298,29 @@ export interface ApiFavorite {
   favoritedAt: string;
 }
 
+/**
+ * The administrator-defined submission rules (C8 and C9).
+ *
+ * A null bound means no bound — which is what migration 011 seeded, so nothing changed on the
+ * day the store landed. The three lists are what the submit page offers and what the server
+ * validates against, so they cannot drift the way the hardcoded copies did.
+ */
+export interface ApiSiteSettings {
+  minStars: number | null;
+  maxStars: number | null;
+  minLengthSeconds: number | null;
+  maxLengthSeconds: number | null;
+  allowedStatuses: string[];
+  allowedMods: string[];
+  allowedChallengeTypes: string[];
+}
+
+/** The same rules plus who last changed them — GET /api/admin/settings only. */
+export interface ApiAdminSiteSettings extends ApiSiteSettings {
+  updatedBy: number | null;
+  updatedAt: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -449,6 +472,12 @@ export const api = {
       send<{ ok: boolean; imported: number; favorites: ApiFavorite[] }>("POST", "/favorites/import"),
   },
 
+  // ── Settings ───────────────────────────────────────────────────────────────
+  settings: {
+    /** The submission rules. Public: a player has to know what they must satisfy. */
+    get: () => get<ApiSiteSettings>("/settings"),
+  },
+
   // ── Admin ──────────────────────────────────────────────────────────────────
   admin: {
     /** `endsAt` overrides the scheduled end of the phase being entered. */
@@ -482,6 +511,14 @@ export const api = {
         "/admin/round/winner",
         submissionId === undefined ? {} : { submissionId }
       ),
+    /** The submission rules, with who last changed them. */
+    settings: () => get<ApiAdminSiteSettings>("/admin/settings"),
+    /**
+     * Saves part of the rules. A PATCH, so the `rules` tab saving star limits cannot rewrite
+     * the `challenge` tab's lists with whatever it last rendered.
+     */
+    saveSettings: (patch: Partial<ApiSiteSettings>) =>
+      send<{ ok: boolean; settings: ApiAdminSiteSettings }>("PUT", "/admin/settings", patch),
     /** Every account, with the effective capability flags and any override. */
     users: () => get<ApiAdminUser[]>("/admin/users"),
     /** Only the accounts that carry an override — the exception list. */

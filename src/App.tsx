@@ -6,7 +6,14 @@ import { SearchPage } from './components/platform/SearchPage';
 import { AdminDashboard } from './components/platform/AdminDashboard';
 import { PlatformSubmitPage } from './components/platform/PlatformSubmitPage';
 import { ArchivePage } from './components/platform/ArchivePage';
-import { api, ApiChallengeScore, ApiFavorite, ApiSubmission, ApiUser } from './api/client';
+import {
+  api,
+  ApiChallengeScore,
+  ApiFavorite,
+  ApiSiteSettings,
+  ApiSubmission,
+  ApiUser,
+} from './api/client';
 import { CurrentRound, toCurrentRound } from './lib/round';
 import { favoriteToBeatmap, toBeatmap } from './lib/submission';
 import { Beatmap, Phase, PlatformPage } from './types';
@@ -43,6 +50,8 @@ export default function App() {
   /** The caller's favorites, both sources. Empty when signed out. */
   const [favorites, setFavorites] = useState<ApiFavorite[]>([]);
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
+  /** The administrator-defined submission rules (C8, C9). Null until the first read. */
+  const [settings, setSettings] = useState<ApiSiteSettings | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [playState, setPlayState] = useState<PlayState | null>(null);
 
@@ -73,7 +82,7 @@ export default function App() {
   // set. The per-caller reads answer 401 when signed out and client.ts maps a failed
   // read to null, so asking for them before the session is known is safe.
   const refresh = useCallback(async () => {
-    const [current, submissions, mine, vote, scores, score, favs] = await Promise.all([
+    const [current, submissions, mine, vote, scores, score, favs, rules] = await Promise.all([
       api.rounds.current(),
       api.submissions.list(),
       api.submissions.mine(),
@@ -81,12 +90,14 @@ export default function App() {
       api.challenge.scores(),
       api.challenge.my(),
       api.favorites.list(),
+      api.settings.get(),
     ]);
     // isVoted is per-caller, so it is applied here rather than in toBeatmap.
     const votedId = vote?.submissionId ?? null;
     setRound(toCurrentRound(current));
     setMaps((submissions ?? []).map((s) => ({ ...toBeatmap(s), isVoted: s.id === votedId })));
     setFavorites(favs ?? []);
+    setSettings(rules);
     setMySubmission(mine);
     setMyVote(votedId);
     // The server already ordered these by the round's challenge requirement, so they
@@ -347,6 +358,7 @@ export default function App() {
             mySubmission={mySubmission}
             favorites={favoriteMaps}
             onFavorite={handleFavorite}
+            settings={settings}
             loading={!loaded}
             onSubmitted={setMySubmission}
             onWithdraw={handleWithdraw}
