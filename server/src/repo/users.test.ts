@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isCountryCode, normalise } from './allowedCountries.js';
-import { isEligible, type UserRow } from './users.js';
+import { canParticipate, isEligible, type UserRow } from './users.js';
 
 const user = (country: string): UserRow => ({
   id: 1,
@@ -67,5 +67,57 @@ describe('allowedCountries helpers', () => {
     expect(isCountryCode('')).toBe(false);
     expect(isCountryCode(undefined)).toBe(false);
     expect(isCountryCode(12)).toBe(false);
+  });
+});
+
+describe('canParticipate', () => {
+  const dz = () => user('DZ');
+  const fr = () => user('FR');
+  const enabled = allowlist('DZ');
+
+  it('falls back to the country rule when there is no override', () => {
+    expect(canParticipate('submit', dz(), enabled, null)).toBe(true);
+    expect(canParticipate('vote', dz(), enabled, null)).toBe(true);
+    expect(canParticipate('submit', fr(), enabled, null)).toBe(false);
+    expect(canParticipate('vote', fr(), enabled, null)).toBe(false);
+  });
+
+  // C5's own VERIFY: block voting for an eligible account and it must still be able to
+  // submit. This is the case a single "banned" flag could not express.
+  it('blocks one capability without touching the other', () => {
+    const blockedFromVoting = { can_submit: null, can_vote: false };
+    expect(canParticipate('vote', dz(), enabled, blockedFromVoting)).toBe(false);
+    expect(canParticipate('submit', dz(), enabled, blockedFromVoting)).toBe(true);
+
+    const blockedFromSubmitting = { can_submit: false, can_vote: null };
+    expect(canParticipate('submit', dz(), enabled, blockedFromSubmitting)).toBe(false);
+    expect(canParticipate('vote', dz(), enabled, blockedFromSubmitting)).toBe(true);
+  });
+
+  // An override wins in BOTH directions, which is why this cannot be "country AND not
+  // blocked": a diaspora player granted a vote is the case my_plan.txt asks for.
+  it('grants a capability the country rule would refuse', () => {
+    const granted = { can_submit: null, can_vote: true };
+    expect(canParticipate('vote', fr(), enabled, granted)).toBe(true);
+    expect(canParticipate('submit', fr(), enabled, granted)).toBe(false);
+  });
+
+  it('refuses a capability even when the country rule allows it', () => {
+    expect(canParticipate('vote', dz(), enabled, { can_submit: true, can_vote: false })).toBe(false);
+  });
+
+  // A row overriding nothing is refused by the route, but the rule still has to behave: it
+  // means the country allowlist decides, not that everything is denied.
+  it('treats an all-null override as no override at all', () => {
+    const empty = { can_submit: null, can_vote: null };
+    expect(canParticipate('vote', dz(), enabled, empty)).toBe(true);
+    expect(canParticipate('vote', fr(), enabled, empty)).toBe(false);
+  });
+
+  // false is a meaningful value, so the resolver must not treat it as "unset" — the bug a
+  // truthiness check would introduce.
+  it('honours false rather than reading it as unset', () => {
+    expect(canParticipate('submit', dz(), enabled, { can_submit: false, can_vote: false })).toBe(false);
+    expect(canParticipate('vote', dz(), enabled, { can_submit: false, can_vote: false })).toBe(false);
   });
 });

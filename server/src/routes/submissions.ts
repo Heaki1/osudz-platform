@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import type { Response } from 'express';
-import { requireAuth, requireEligible } from '../middleware/auth.js';
+import { requireAuth, requireCanSubmit } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { findCurrent } from '../repo/rounds.js';
 import {
@@ -88,7 +88,7 @@ router.get('/mine', requireAuth, async (req, res) => {
 // Submission phase only. Past it the entry is in the ballot, and
 // votes.submission_id cascades, so withdrawing would delete votes cast for it and
 // move every other entry's standing.
-router.delete('/mine', requireEligible, async (req, res) => {
+router.delete('/mine', requireCanSubmit, async (req, res) => {
   try {
     const round = await findCurrent();
     if (!round) {
@@ -102,7 +102,7 @@ router.delete('/mine', requireEligible, async (req, res) => {
       return;
     }
 
-    // requireEligible guarantees req.user, but the type does not know that.
+    // requireCanSubmit guarantees req.user, but the type does not know that.
     const user = req.user;
     if (!user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -127,7 +127,7 @@ router.delete('/mine', requireEligible, async (req, res) => {
 // quota in a loop. Twenty a minute is far more than pasting links by hand needs.
 const lookupLimit = rateLimit({ limit: 20, windowMs: 60_000, what: 'beatmap lookups' });
 
-router.post('/lookup', requireEligible, lookupLimit, async (req, res) => {
+router.post('/lookup', requireCanSubmit, lookupLimit, async (req, res) => {
   const { url } = (req.body ?? {}) as { url?: unknown };
   if (typeof url !== 'string' || url.trim() === '') {
     res.status(400).json({ error: 'Paste an osu! beatmap URL' });
@@ -154,7 +154,7 @@ router.post('/lookup', requireEligible, lookupLimit, async (req, res) => {
 // Requires an eligible session, the submission phase, and no existing entry.
 const submitLimit = rateLimit({ limit: 10, windowMs: 60_000, what: 'submission attempts' });
 
-router.post('/', requireEligible, submitLimit, async (req, res) => {
+router.post('/', requireCanSubmit, submitLimit, async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
 
   const difficultyId =
@@ -192,7 +192,7 @@ router.post('/', requireEligible, submitLimit, async (req, res) => {
       return;
     }
 
-    // requireEligible guarantees req.user, but the type does not know that.
+    // requireCanSubmit guarantees req.user, but the type does not know that.
     const user = req.user;
     if (!user) {
       res.status(401).json({ error: 'Not authenticated' });

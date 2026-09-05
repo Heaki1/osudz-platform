@@ -34,11 +34,46 @@ const COLUMNS = 'id, osu_id, username, country_code, avatar_url, global_rank, is
  * async in a place where it would have to await inside a render or a map. Passing it in
  * is also what keeps this testable without a database.
  *
- * Administrator-granted per-player exceptions are C5, and they layer on top of this
- * rather than replacing it.
+ * Administrator-granted per-player exceptions (C5) layer on top of this through
+ * canParticipate; this function stays the COUNTRY rule and nothing else.
  */
 export const isEligible = (row: UserRow, allowedCountries: ReadonlySet<string>): boolean =>
   allowedCountries.has(row.country_code.trim().toUpperCase());
+
+/** The two things an administrator controls independently (C5). */
+export type Capability = 'submit' | 'vote';
+
+/**
+ * A per-player override, as much of one as the rule needs. Structural rather than an
+ * import of ParticipantPermissionRow, so this file stays testable without a database and
+ * the two modules do not need each other at runtime.
+ *
+ * THREE-VALUED, and that is the whole point: null means "no override for this capability",
+ * so blocking someone from voting says nothing at all about whether they may submit.
+ */
+export interface CapabilityOverride {
+  can_submit: boolean | null;
+  can_vote: boolean | null;
+}
+
+/**
+ * Whether an account may use one capability: the administrator's override for that
+ * capability if there is one, otherwise the country rule.
+ *
+ * An override wins in BOTH directions — it can refuse a player the country rule allows,
+ * and grant one it refuses. That is C5's decision, and it is why this cannot be written as
+ * "country rule AND not blocked".
+ */
+export function canParticipate(
+  capability: Capability,
+  row: UserRow,
+  allowedCountries: ReadonlySet<string>,
+  override: CapabilityOverride | null
+): boolean {
+  const explicit = capability === 'submit' ? override?.can_submit : override?.can_vote;
+  if (explicit === true || explicit === false) return explicit;
+  return isEligible(row, allowedCountries);
+}
 
 /**
  * Creates the user on first login and refreshes the mutable fields on every
@@ -69,6 +104,18 @@ export async function upsertFromOsu(me: OsuMe): Promise<UserRow> {
   return rows[0];
 }
 
+/**
+ * By internal id, for the admin routes that address an account by the id the client
+ * already has. Distinct from findByOsuId, which is the login path's lookup.
+ */
+export async function findById(id: number): Promise<UserRow | null> {
+  const { rows } = await pool.query<UserRow>(
+    `SELECT ${COLUMNS} FROM users WHERE id = $1`,
+    [id]
+  );
+  return rows[0] ?? null;
+}
+
 export async function findByOsuId(osuId: number): Promise<UserRow | null> {
   const { rows } = await pool.query<UserRow>(
     `SELECT ${COLUMNS} FROM users WHERE osu_id = $1`,
@@ -80,10 +127,15 @@ export async function findByOsuId(osuId: number): Promise<UserRow | null> {
 /**
  * Maps a row to the ApiUser DTO declared in src/api/client.ts.
  *
- * Takes the allowlist for the same reason isEligible does: canVote and the gate that
- * refuses the write have to be the same sentence, so they read the same set.
+ * Takes the allowlist and the override for the same reason canParticipate does: the flags
+ * the client reads and the gates that refuse the writes have to be the same sentence, so
+ * they resolve through the same function rather than two copies that drift.
  */
-export function toApiUser(row: UserRow, allowedCountries: ReadonlySet<string>) {
+export function toApiUser(
+  row: UserRow,
+  allowedCountries: ReadonlySet<string>,
+  override: CapabilityOverride | null = null
+) {
   return {
     id: row.id,
     osuId: Number(row.osu_id),
@@ -92,6 +144,67 @@ export function toApiUser(row: UserRow, allowedCountries: ReadonlySet<string>) {
     avatarUrl: row.avatar_url ?? '',
     globalRank: row.global_rank,
     isAdmin: row.is_admin,
-    canVote: isEligible(row, allowedCountries),
+    canVote: canParticipate('vote', row, allowedCountries, override),
+    canSubmit: canParticipate('submit', row, allowedCountries, override),
+  };
+}
+
+/**
+ * A user row with whatever override applies to it, for the admin Users tab.
+ *
+ * LEFT JOIN, not an inner one: the tab shows the whole roster, and most accounts have no
+ * override at all — an inner join would quietly render only the exceptions.
+ */
+export interface UserWithOverrideRow extends UserRow, CapabilityOverride {
+  note: string | null;
+  set_by: number | null;
+  set_at: Date | null;
+}
+
+export async function listAllWithOverrides(): Promise<UserWithOverrideRow[]> {
+  const { rows } = await pool.query<UserWithOverrideRow>(
+    `SELECT u.id, u.osu_id, u.username, u.country_code, u.avatar_url, u.global_rank,
+            u.is_admin,
+            p.can_submit, p.can_vote, p.note, p.set_by, p.set_at
+       FROM users u
+       LEFT JOIN participant_permissions p ON p.user_id = u.id
+      ORDER BY u.username`
+  );
+  return rows;
+}
+
+/** Whether a joined row actually carries an override, as opposed to all-null columns. */
+export const hasOverride = (row: UserWithOverrideRow): boolean =>
+  row.set_at !== null;
+
+/**
+ * Maps a joined roster row to the ApiAdminUser DTO in src/api/client.ts.
+ *
+ * canSubmit and canVote are the EFFECTIVE answers — what the gates would actually decide —
+ * resolved through canParticipate, while `override` carries the raw three-valued row so the
+ * admin tab can show the difference between "granted" and "the country rule already allows
+ * it". Sending only one of the two would make the tab either lie or guess.
+ */
+export function toApiAdminUser(row: UserWithOverrideRow, allowedCountries: ReadonlySet<string>) {
+  return {
+    id: row.id,
+    osuId: Number(row.osu_id),
+    username: row.username,
+    country: row.country_code.trim(),
+    avatarUrl: row.avatar_url ?? '',
+    globalRank: row.global_rank,
+    isAdmin: row.is_admin,
+    canSubmit: canParticipate('submit', row, allowedCountries, row),
+    canVote: canParticipate('vote', row, allowedCountries, row),
+    countryAllowed: isEligible(row, allowedCountries),
+    override: hasOverride(row)
+      ? {
+          canSubmit: row.can_submit,
+          canVote: row.can_vote,
+          note: row.note,
+          setBy: row.set_by,
+          setAt: row.set_at?.toISOString() ?? null,
+        }
+      : null,
   };
 }

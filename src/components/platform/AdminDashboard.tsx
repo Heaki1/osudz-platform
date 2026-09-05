@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Phase } from '../../types';
-import { api, ApiAllowedCountry, ApiSubmission, ApiVoteAudit } from '../../api/client';
+import {
+  api,
+  ApiAdminUser,
+  ApiAllowedCountry,
+  ApiParticipantException,
+  ApiSubmission,
+  ApiVoteAudit,
+} from '../../api/client';
 import { CurrentRound, formatDeadline, roundLabel, useCountdown } from '../../lib/round';
 import { beatmapUrl } from '../../lib/submission';
 import { AuthUser } from './NavHeader';
@@ -16,7 +23,7 @@ import {
 type AdminTab = 'round' | 'submissions' | 'eligibility' | 'rules' | 'challenge' | 'users' | 'config';
 
 /** Tabs backed by a real endpoint. The rest are still UI only. */
-const WIRED_TABS: AdminTab[] = ['round', 'submissions', 'eligibility'];
+const WIRED_TABS: AdminTab[] = ['round', 'submissions', 'eligibility', 'users'];
 
 const TABS: { key: AdminTab; label: string; icon: React.ReactNode }[] = [
   { key: 'round',       label: 'Round Control', icon: <Clock className="w-4 h-4" /> },
@@ -790,19 +797,23 @@ function flagEmoji(code: string): string {
 
 function EligibilityTab() {
   const [countries, setCountries] = useState<ApiAllowedCountry[] | null>(null);
+  const [exceptions, setExceptions] = useState<ApiParticipantException[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The code currently being written, so only its own row shows as busy. */
   const [busy, setBusy] = useState<string | null>(null);
   const [newCode, setNewCode] = useState('');
 
   const load = useCallback(async () => {
-    const rows = await api.admin.countries();
-    if (rows === null) {
-      setError('Could not read the country allowlist.');
+    // Both halves of this tab in one pass: the allowlist decides an account unless an
+    // exception overrides it, so showing one without the other would be half a rule.
+    const [rows, overrides] = await Promise.all([api.admin.countries(), api.admin.participants()]);
+    if (rows === null || overrides === null) {
+      setError('Could not read the eligibility settings.');
       return;
     }
     setError(null);
     setCountries(rows);
+    setExceptions(overrides);
   }, []);
 
   useEffect(() => {
@@ -823,6 +834,17 @@ function EligibilityTab() {
   const drop = async (code: string) => {
     setBusy(code);
     const res = await api.admin.removeCountry(code);
+    setBusy(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    await load();
+  };
+
+  const clearException = async (userId: number) => {
+    setBusy(String(userId));
+    const res = await api.admin.clearParticipant(userId);
     setBusy(null);
     if (!res.ok) {
       setError(res.error);
@@ -938,15 +960,63 @@ function EligibilityTab() {
 
       <Section
         title="User Exceptions"
-        description="Grant or block individual players regardless of country."
+        description="Players an administrator has granted or refused individually, whatever their country."
       >
-        <p className="text-xs text-slate-500">
-          Not available yet. This is C5 in docs/todo.txt: submitting and voting will be
-          controlled independently per player, so an administrator can stop one without
-          stopping the other, or grant either to someone the country rule refuses. The two
-          example rows that used to sit here were invented, so they are gone rather than
-          left to look like real exceptions.
-        </p>
+        {exceptions === null ? (
+          <p className="text-xs text-slate-500">Loading exceptions…</p>
+        ) : exceptions.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            No exceptions. Every account is decided by the country allowlist above. Set one from
+            the Users tab, where both capabilities are on the same row.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {exceptions.map((ex) => (
+              <div
+                key={ex.userId}
+                className="flex items-center gap-3 bg-slate-900/40 border border-slate-800 rounded-xl px-4 py-2.5"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white truncate">
+                    {ex.username}
+                    <span className="ml-2 text-[10px] font-mono text-slate-600">{ex.country}</span>
+                  </p>
+                  {ex.note && <p className="text-[10px] text-slate-500 truncate">{ex.note}</p>}
+                  <p className="text-[10px] text-slate-600">
+                    set {formatDeadline(ex.setAt)}
+                    {ex.setByName && ` by ${ex.setByName}`}
+                  </p>
+                </div>
+                {(['submit', 'vote'] as const).map((cap) => {
+                  const value = cap === 'submit' ? ex.canSubmit : ex.canVote;
+                  if (value === null) return null;
+                  return (
+                    <span
+                      key={cap}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        value
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                          : 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                      }`}
+                    >
+                      {value ? 'may' : 'cannot'} {cap}
+                    </span>
+                  );
+                })}
+                <button
+                  type="button"
+                  disabled={busy === String(ex.userId)}
+                  onClick={() => void clearException(ex.userId)}
+                  aria-label={`Clear the exception for ${ex.username}`}
+                  title="Clear it, so the country allowlist decides this account again."
+                  className="text-slate-600 hover:text-rose-400 transition-colors disabled:opacity-40"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
     </div>
   );
@@ -1120,84 +1190,226 @@ function ChallengeTab() {
 }
 
 // ── USERS ─────────────────────────────────────────────────────────────────────
+//
+// C5. The six fabricated players and the mock Ban/Unban button are gone. This reads
+// GET /api/admin/users and writes per-player overrides, and the two capabilities are
+// SEPARATE controls because C5's decision is that they are set independently — a single
+// ban toggle could not express "may still submit, may not vote".
+//
+// The old "Submissions" column is gone with the fixtures: nothing counts submissions per
+// account, and a column filled with a plausible number would be the exact kind of
+// fabrication the rest of this work has been deleting.
 
-const SAMPLE_USERS = [
-  { id: '1', username: 'Rimuru_dz',     country: 'DZ', rank: 12043, submissions: 3, banned: false },
-  { id: '2', username: 'Saya_Kizuname', country: 'DZ', rank: 98321, submissions: 1, banned: false },
-  { id: '3', username: 'Azzedd',         country: 'DZ', rank: 4201,  submissions: 5, banned: false },
-  { id: '4', username: 'TheSlimyBoy',   country: 'DZ', rank: 55120, submissions: 2, banned: true  },
-  { id: '5', username: 'xX_Djezz_Xx',   country: 'DZ', rank: 7830,  submissions: 4, banned: false },
-  { id: '6', username: 'NAT_Oran',       country: 'DZ', rank: 21000, submissions: 1, banned: false },
+/** What an administrator can set a capability to. null means "let the country rule decide". */
+type Override = boolean | null;
+
+const OVERRIDE_CYCLE: Override[] = [null, true, false];
+
+const OVERRIDE_LOOK: { value: Override; label: string; className: string }[] = [
+  { value: null,  label: 'Auto',  className: 'bg-slate-800 border-slate-700 text-slate-400' },
+  { value: true,  label: 'Allow', className: 'bg-emerald-500/15 border-emerald-500/35 text-emerald-400' },
+  { value: false, label: 'Block', className: 'bg-rose-500/15 border-rose-500/35 text-rose-400' },
 ];
+
+/**
+ * One capability, as a three-state button that cycles Auto -> Allow -> Block.
+ *
+ * Three states rather than a switch, because the underlying column is three-valued and
+ * collapsing it would lose the difference that matters: "Auto" means the country allowlist
+ * decides and will keep deciding if an administrator later changes it, while "Allow" is a
+ * standing grant that survives the country being disabled.
+ */
+function CapabilityButton({
+  value,
+  effective,
+  busy,
+  onCycle,
+}: {
+  value: Override;
+  effective: boolean;
+  busy: boolean;
+  onCycle: (next: Override) => void;
+}) {
+  const look = OVERRIDE_LOOK.find((o) => o.value === value) ?? OVERRIDE_LOOK[0];
+  const next = OVERRIDE_CYCLE[(OVERRIDE_CYCLE.indexOf(value) + 1) % OVERRIDE_CYCLE.length];
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => onCycle(next)}
+      title={
+        value === null
+          ? `Auto — the country allowlist decides, and currently ${effective ? 'allows' : 'refuses'} it`
+          : value
+            ? 'Allowed by an administrator, whatever the country rule says'
+            : 'Refused by an administrator, whatever the country rule says'
+      }
+      className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all disabled:opacity-40 ${look.className}`}
+    >
+      {look.label}
+      {value === null && <span className="ml-1 opacity-60">{effective ? '✓' : '✕'}</span>}
+    </button>
+  );
+}
 
 function UsersTab() {
   const [q, setQ] = useState('');
-  const [users, setUsers] = useState(SAMPLE_USERS);
+  const [users, setUsers] = useState<ApiAdminUser[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
 
-  const shown = users.filter((u) => u.username.toLowerCase().includes(q.toLowerCase()));
+  const load = useCallback(async () => {
+    const rows = await api.admin.users();
+    if (rows === null) {
+      setError('Could not read the user list.');
+      return;
+    }
+    setError(null);
+    setUsers(rows);
+  }, []);
 
-  const toggleBan = (id: string) =>
-    setUsers((prev) => prev.map((u) => u.id === id ? { ...u, banned: !u.banned } : u));
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /**
+   * Writes one capability. Clearing the last remaining override deletes the row rather
+   * than storing one that overrides nothing — the server refuses that anyway, and a row
+   * saying an administrator decided to change nothing is not a record of anything.
+   */
+  const setCapability = async (u: ApiAdminUser, capability: 'submit' | 'vote', next: Override) => {
+    const canSubmit = capability === 'submit' ? next : (u.override?.canSubmit ?? null);
+    const canVote = capability === 'vote' ? next : (u.override?.canVote ?? null);
+
+    setBusy(u.id);
+    const res =
+      canSubmit === null && canVote === null
+        ? u.override === null
+          ? { ok: true as const }
+          : await api.admin.clearParticipant(u.id)
+        : await api.admin.setParticipant(u.id, { canSubmit, canVote, note: u.override?.note ?? null });
+    setBusy(null);
+
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError(null);
+    await load();
+  };
+
+  const needle = q.trim().toLowerCase();
+  const shown = (users ?? []).filter(
+    (u) => needle === '' || u.username.toLowerCase().includes(needle) || String(u.osuId).includes(needle)
+  );
 
   return (
     <div className="space-y-5">
+      {error && (
+        <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+          <p className="text-xs text-rose-300/90">{error}</p>
+        </div>
+      )}
+
       <div className="relative">
         <Users className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
         <input
           type="text"
-          placeholder="Search by username…"
+          placeholder="Search by username or osu! id…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           className="w-full bg-[#0d1526] border border-slate-800 focus:border-amber-400/50 rounded-xl pl-10 pr-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none transition-colors"
         />
       </div>
 
-      <div className="bg-[#0d1526] border border-slate-800 rounded-2xl overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-slate-800">
-              <th className="text-left text-[10px] uppercase tracking-wider text-slate-600 font-mono px-5 py-3">Username</th>
-              <th className="text-left text-[10px] uppercase tracking-wider text-slate-600 font-mono px-5 py-3">Country</th>
-              <th className="text-left text-[10px] uppercase tracking-wider text-slate-600 font-mono px-5 py-3">Rank</th>
-              <th className="text-left text-[10px] uppercase tracking-wider text-slate-600 font-mono px-5 py-3">Submissions</th>
-              <th className="text-left text-[10px] uppercase tracking-wider text-slate-600 font-mono px-5 py-3">Status</th>
-              <th className="px-5 py-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((u, i) => (
-              <tr key={u.id} className={`border-b border-slate-800/50 last:border-0 ${i % 2 === 1 ? 'bg-slate-900/20' : ''}`}>
-                <td className="px-5 py-3 text-sm font-bold text-white">{u.username}</td>
-                <td className="px-5 py-3 text-sm text-slate-400 font-mono">{u.country}</td>
-                <td className="px-5 py-3 text-sm font-mono text-slate-300">#{u.rank.toLocaleString()}</td>
-                <td className="px-5 py-3 text-sm font-mono text-slate-400">{u.submissions}</td>
-                <td className="px-5 py-3">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                    u.banned
-                      ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
-                      : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                  }`}>
-                    {u.banned ? 'Banned' : 'Active'}
-                  </span>
-                </td>
-                <td className="px-5 py-3 text-right">
-                  <button
-                    type="button"
-                    onClick={() => toggleBan(u.id)}
-                    className={`text-[10px] font-bold px-3 py-1 rounded-lg border transition-all ${
-                      u.banned
-                        ? 'bg-slate-800 border-slate-700 hover:border-emerald-500/50 text-slate-400 hover:text-emerald-400'
-                        : 'bg-slate-800 border-slate-700 hover:border-rose-500/50 text-slate-400 hover:text-rose-400'
-                    }`}
-                  >
-                    {u.banned ? 'Unban' : 'Ban'}
-                  </button>
-                </td>
+      <p className="text-[11px] text-slate-500">
+        Auto leaves a capability to the country allowlist; the tick or cross beside it is what
+        that currently decides. Allow and Block override it in either direction, and the two are
+        independent — an account can be blocked from voting and still enter a beatmap. Blocking
+        is forward-only: a vote already cast stays counted.
+      </p>
+
+      {users === null ? (
+        <p className="text-xs text-slate-500">Loading accounts…</p>
+      ) : shown.length === 0 ? (
+        <p className="text-xs text-slate-500">
+          {users.length === 0 ? 'Nobody has signed in yet.' : 'No account matches that search.'}
+        </p>
+      ) : (
+        <div className="bg-[#0d1526] border border-slate-800 rounded-2xl overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-800">
+                {['Player', 'Country', 'Rank', 'Submit', 'Vote', 'Note'].map((h) => (
+                  <th key={h} className="text-left text-[10px] uppercase tracking-wider text-slate-600 font-mono px-5 py-3">
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {shown.map((u, i) => (
+                <tr
+                  key={u.id}
+                  className={`border-b border-slate-800/50 last:border-0 ${i % 2 === 1 ? 'bg-slate-900/20' : ''}`}
+                >
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2.5">
+                      {u.avatarUrl && (
+                        <img
+                          src={u.avatarUrl}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          className="w-7 h-7 rounded-full bg-slate-800 flex-shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-white truncate">{u.username}</p>
+                        <p className="text-[10px] text-slate-600 font-mono">
+                          {u.osuId}
+                          {u.isAdmin && <span className="ml-1.5 text-amber-400/80">admin</span>}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3">
+                    <span
+                      className={`text-sm font-mono ${u.countryAllowed ? 'text-slate-300' : 'text-slate-500'}`}
+                      title={u.countryAllowed ? 'On the allowlist' : 'Not on the allowlist'}
+                    >
+                      {u.country || '—'}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-sm font-mono text-slate-400">
+                    {u.globalRank === null ? '—' : `#${u.globalRank.toLocaleString()}`}
+                  </td>
+                  <td className="px-5 py-3">
+                    <CapabilityButton
+                      value={u.override?.canSubmit ?? null}
+                      effective={u.canSubmit}
+                      busy={busy === u.id}
+                      onCycle={(next) => void setCapability(u, 'submit', next)}
+                    />
+                  </td>
+                  <td className="px-5 py-3">
+                    <CapabilityButton
+                      value={u.override?.canVote ?? null}
+                      effective={u.canVote}
+                      busy={busy === u.id}
+                      onCycle={(next) => void setCapability(u, 'vote', next)}
+                    />
+                  </td>
+                  <td className="px-5 py-3 text-[11px] text-slate-500 max-w-[16rem] truncate">
+                    {u.override?.note ?? ''}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

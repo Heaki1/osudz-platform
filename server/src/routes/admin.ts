@@ -28,7 +28,19 @@ import {
   REVIEW_DECISIONS,
   type ReviewDecision,
 } from '../repo/submissions.js';
-import { findByOsuId } from '../repo/users.js';
+import {
+  findById as findUserById,
+  findByOsuId,
+  listAllWithOverrides,
+  toApiAdminUser,
+} from '../repo/users.js';
+import {
+  listAll as listOverrides,
+  remove as removeOverride,
+  toApiOverride,
+  upsert as upsertOverride,
+} from '../repo/participantPermissions.js';
+import { enabledSet } from '../repo/allowedCountries.js';
 import {
   isCountryCode,
   listAll as listCountries,
@@ -502,8 +514,9 @@ router.patch('/submissions/:id', async (req, res) => {
 // ── Country allowlist (C4) ───────────────────────────────────────────────────
 //
 // These replace ELIGIBLE_COUNTRY, which was a constant in repo/users.ts. Enabling a
-// country here is what lets its players submit and vote; requireEligible and the canVote
-// flag on ApiUser both read the same table through the same cache, so they cannot drift.
+// country here is what lets its players submit and vote; the capability gates and the
+// canSubmit / canVote flags on ApiUser all read this table through the same cache, so they
+// cannot drift.
 //
 // NOTHING STOPS AN ADMINISTRATOR DISABLING EVERY COUNTRY, on purpose. It is a legitimate
 // way to pause participation, it locks nobody out of administration — requireAdmin is
@@ -568,4 +581,129 @@ router.delete('/countries/:code', async (req, res) => {
   }
 });
 
+// ── Per-participant permissions (C5) ─────────────────────────────────────────
+//
+// Manual controls applied after an investigation, not an automatic punishment system.
+// Submitting and voting are set INDEPENDENTLY, and each flag is three-valued: null means
+// "no override, the country allowlist decides", true grants, false refuses. An override
+// wins in both directions, which is why it cannot be modelled as a ban list.
+//
+// A BLOCK IS FORWARD-ONLY. Nothing here touches the votes table — a validly cast vote is
+// counted permanently, and only an explicit result correction (D4) changes a recorded
+// result. Blocking somebody stops them voting again; it does not un-cast what they cast.
+
+router.get('/users', async (_req, res) => {
+  try {
+    const [rows, allowed] = await Promise.all([listAllWithOverrides(), enabledSet()]);
+    res.json(rows.map((row) => toApiAdminUser(row, allowed)));
+  } catch (err) {
+    fail(res, err, 'user roster read');
+  }
+});
+
+/** Every override, with the account it applies to — the Eligibility tab's exception list. */
+router.get('/participants', async (_req, res) => {
+  try {
+    const rows = await listOverrides();
+    res.json(
+      rows.map((row) => ({
+        userId: row.user_id,
+        username: row.username,
+        osuId: Number(row.osu_id),
+        country: row.country_code.trim(),
+        avatarUrl: row.avatar_url ?? '',
+        canSubmit: row.can_submit,
+        canVote: row.can_vote,
+        note: row.note,
+        setBy: row.set_by,
+        setByName: row.set_by_name,
+        setAt: row.set_at.toISOString(),
+      }))
+    );
+  } catch (err) {
+    fail(res, err, 'permission override read');
+  }
+});
+
+/** Accepts true, false, or null for each capability. null clears that one only. */
+function readFlag(value: unknown): boolean | null | undefined {
+  if (value === null || typeof value === 'boolean') return value;
+  return undefined;
+}
+
+router.put('/participants/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    res.status(400).json({ error: 'userId must be a positive integer' });
+    return;
+  }
+
+  const { canSubmit, canVote, note } = (req.body ?? {}) as Record<string, unknown>;
+  const submit = readFlag(canSubmit);
+  const vote = readFlag(canVote);
+  if (submit === undefined || vote === undefined) {
+    res.status(400).json({ error: 'canSubmit and canVote must each be true, false, or null' });
+    return;
+  }
+  if (note !== undefined && note !== null && typeof note !== 'string') {
+    res.status(400).json({ error: 'note must be a string or null' });
+    return;
+  }
+  // A row that overrides nothing is not a record of anything, and it would sit in the
+  // exception list saying that an administrator decided to change nothing.
+  if (submit === null && vote === null) {
+    res.status(400).json({
+      error: 'Set at least one of canSubmit or canVote. To clear both, delete the override.',
+    });
+    return;
+  }
+
+  // requireAdmin guarantees req.user, but the type does not know that.
+  const admin = req.user;
+  if (!admin) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  try {
+    // A real foreign key, so a bad id has to be caught before the insert rather than
+    // surfacing as a 23503 the caller cannot read.
+    const target = await findUserById(userId);
+    if (!target) {
+      res.status(404).json({ error: 'No such account. A player must have signed in at least once.' });
+      return;
+    }
+
+    const row = await upsertOverride(
+      userId,
+      { canSubmit: submit, canVote: vote, note: typeof note === 'string' && note.trim() !== '' ? note.trim() : null },
+      admin.id
+    );
+    res.json({ ok: true, override: toApiOverride(row) });
+  } catch (err) {
+    fail(res, err, 'permission override write');
+  }
+});
+
+/** Removes the override entirely, so the country rule applies to that account again. */
+router.delete('/participants/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    res.status(400).json({ error: 'userId must be a positive integer' });
+    return;
+  }
+
+  try {
+    const removed = await removeOverride(userId);
+    if (!removed) {
+      res.status(404).json({ error: 'That account has no override to clear' });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err, 'permission override delete');
+  }
+});
+
 export default router;
+

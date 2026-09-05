@@ -48,7 +48,7 @@ const roundMeta: Record<Phase, { label: string; color: string; bar: string; desc
     label: 'VOTING PHASE',
     color: 'text-blue-400',
     bar: 'bg-blue-500',
-    desc: 'Cast your vote for the beatmap you want as the monthly challenge. Algerian players get one vote each.',
+    desc: 'Cast your vote for the beatmap you want as the monthly challenge. Eligible players get one vote each.',
   },
   challenge: {
     label: 'CHALLENGE PHASE',
@@ -541,7 +541,7 @@ function SubmissionRequirements({ onNavigate }: { onNavigate: (page: PlatformPag
     'Ranked, Loved or Approved beatmap',
     'A specific difficulty, not just the beatmapset',
     'One submission per player per round',
-    'An Algerian osu! account',
+    'An osu! account eligible to submit',
   ];
 
   return (
@@ -661,7 +661,7 @@ export function DashboardPage({
    */
   const refusal = (id: string): string | undefined => {
     if (!ballotOpen) return 'Voting has closed for this round';
-    if (!canVote) return 'Voting is available to Algerian osu! players';
+    if (!canVote) return 'Your account is not eligible to vote in this round';
     if (id === ownMapId) return 'You cannot vote for your own submission';
     return undefined;
   };
@@ -859,7 +859,7 @@ export function DashboardPage({
                   </div>
                   <p className="text-white font-bold mb-1">Login to vote</p>
                   <p className="text-sm text-slate-500 mb-5">
-                    Verified Algerian osu! players get one vote per round.
+                    Eligible players get one vote per round.
                   </p>
                   <button
                     type="button"
@@ -874,9 +874,10 @@ export function DashboardPage({
                   <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto mb-4">
                     <Ban className="w-7 h-7 text-slate-700" />
                   </div>
-                  <p className="text-white font-bold mb-1">Voting is available to Algerian osu! players.</p>
+                  <p className="text-white font-bold mb-1">Your account cannot vote in this round.</p>
                   <p className="text-sm text-slate-500">
-                    Eligibility comes from your osu! profile country, read when you log in.
+                    Eligibility comes from your osu! profile country, read when you log in, and can
+                    be granted or withdrawn per player by an administrator.
                   </p>
                 </div>
               ) : votedMap ? (

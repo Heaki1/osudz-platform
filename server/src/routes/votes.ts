@@ -1,7 +1,7 @@
 // Vote endpoints.
 //
 // One vote per user per round, cast during the voting phase only. The database
-// enforces the "one" (votes_one_per_user_per_round) and requireEligible enforces
+// enforces the "one" (votes_one_per_user_per_round) and requireCanVote enforces
 // the "who". Everything else is checked here, because the votes table deliberately
 // carries no composite foreign key tying a vote's submission to its round, no check
 // that the target was ever approved, and no self-vote constraint — so a crafted
@@ -14,7 +14,7 @@
 
 import { Router } from 'express';
 import type { Response } from 'express';
-import { requireAuth, requireEligible } from '../middleware/auth.js';
+import { requireAuth, requireCanVote } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { findCurrent } from '../repo/rounds.js';
 import { findById } from '../repo/submissions.js';
@@ -76,7 +76,7 @@ router.get('/my', requireAuth, async (req, res) => {
 // your mind repeatedly while browsing and still stops a loop.
 const voteLimit = rateLimit({ limit: 30, windowMs: 60_000, what: 'vote changes' });
 
-router.post('/', requireEligible, voteLimit, async (req, res) => {
+router.post('/', requireCanVote, voteLimit, async (req, res) => {
   const { submissionId } = (req.body ?? {}) as { submissionId?: unknown };
   const id =
     typeof submissionId === 'number' || typeof submissionId === 'string'
@@ -102,7 +102,7 @@ router.post('/', requireEligible, voteLimit, async (req, res) => {
       return;
     }
 
-    // requireEligible guarantees req.user, but the type does not know that.
+    // requireCanVote guarantees req.user, but the type does not know that.
     const user = req.user;
     if (!user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -146,7 +146,7 @@ router.post('/', requireEligible, voteLimit, async (req, res) => {
 
 // DELETE /api/votes — withdraw the caller's vote.
 //
-// requireAuth rather than requireEligible: someone whose osu! profile country
+// requireAuth rather than requireCanVote: someone whose osu! profile country
 // changed after they voted must still be able to take back the vote they hold.
 router.delete('/', requireAuth, voteLimit, async (req, res) => {
   try {

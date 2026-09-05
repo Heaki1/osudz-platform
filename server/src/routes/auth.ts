@@ -20,6 +20,7 @@ import {
   clearSession,
 } from '../session.js';
 import { enabledSet } from '../repo/allowedCountries.js';
+import { findForUser } from '../repo/participantPermissions.js';
 import { upsertFromOsu, findByOsuId, toApiUser } from '../repo/users.js';
 
 const router = Router();
@@ -62,8 +63,10 @@ router.get('/me', async (req, res) => {
   try {
     const user = await findByOsuId(osuId);
     if (!user) return res.json(null);
-    // canVote has to agree with requireEligible, so it reads the same allowlist (C4).
-    return res.json(toApiUser(user, await enabledSet()));
+    // canSubmit and canVote have to agree with the gates that refuse the writes, so they
+    // resolve through the same allowlist (C4) and the same per-player override (C5).
+    const [allowed, override] = await Promise.all([enabledSet(), findForUser(user.id)]);
+    return res.json(toApiUser(user, allowed, override));
   } catch (err) {
     console.error('[auth] /me lookup failed:', err instanceof Error ? err.message : err);
     return res.status(503).json({ error: 'Database unavailable' });

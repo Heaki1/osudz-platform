@@ -20,6 +20,7 @@ const toAuthUser = (u: ApiUser): AuthUser => ({
   country: u.country,
   isAdmin: u.isAdmin,
   canVote: u.canVote,
+  canSubmit: u.canSubmit,
 });
 
 export default function App() {

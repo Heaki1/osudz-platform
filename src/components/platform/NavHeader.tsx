@@ -13,6 +13,11 @@ export interface AuthUser {
   isAdmin: boolean;
   /** Mirrors ApiUser.canVote — the server's own eligibility verdict, not a guess. */
   canVote: boolean;
+  /**
+   * Mirrors ApiUser.canSubmit. Separate from canVote because an administrator controls
+   * the two independently (C5), so neither can be derived from the other.
+   */
+  canSubmit: boolean;
 }
 
 // osu! reports no global_rank for unranked or inactive accounts.

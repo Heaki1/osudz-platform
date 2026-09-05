@@ -370,6 +370,127 @@ console.log('--- country allowlist (C4) ---');
   }
 }
 
+console.log('');
+console.log('--- per-player permissions (C5) ---');
+{
+  const roster = await call('/admin/users');
+  if (roster.status === 403) {
+    skipped('the permission checks', 'this session is not an administrator');
+  } else {
+    const users = Array.isArray(roster.body) ? roster.body : [];
+    ok(
+      'GET /admin/users returns the roster',
+      roster.status === 200 && users.length > 0,
+      `got ${roster.status}: ${JSON.stringify(roster.body).slice(0, 160)}`
+    );
+    ok(
+      'every row carries the effective flags and the inputs that produced them',
+      users.every(
+        (u) =>
+          typeof u.canSubmit === 'boolean' &&
+          typeof u.canVote === 'boolean' &&
+          typeof u.countryAllowed === 'boolean' &&
+          (u.override === null || typeof u.override === 'object')
+      ),
+      JSON.stringify(users[0])
+    );
+
+    const overrides = await call('/admin/participants');
+    ok(
+      'GET /admin/participants lists the overrides',
+      overrides.status === 200 && Array.isArray(overrides.body),
+      `got ${overrides.status}`
+    );
+
+    const badId = await call('/admin/participants/nope', {
+      method: 'PUT',
+      body: JSON.stringify({ canSubmit: false, canVote: null }),
+    });
+    ok('a non-numeric userId answers 400', badId.status === 400, `got ${badId.status}`);
+
+    const badFlag = await call('/admin/participants/1', {
+      method: 'PUT',
+      body: JSON.stringify({ canSubmit: 'no', canVote: null }),
+    });
+    ok('a non-boolean flag answers 400', badFlag.status === 400, `got ${badFlag.status}`);
+
+    // A row overriding nothing records nothing, so it is refused rather than stored.
+    const bothNull = await call('/admin/participants/1', {
+      method: 'PUT',
+      body: JSON.stringify({ canSubmit: null, canVote: null }),
+    });
+    ok('an override that overrides nothing answers 400', bothNull.status === 400, `got ${bothNull.status}`);
+
+    const noSuchUser = await call('/admin/participants/999999', {
+      method: 'PUT',
+      body: JSON.stringify({ canSubmit: false, canVote: null }),
+    });
+    ok(
+      'an account that has never signed in answers 404',
+      noSuchUser.status === 404,
+      `got ${noSuchUser.status}`
+    );
+
+    const nothingToClear = await call('/admin/participants/999999', { method: 'DELETE' });
+    ok(
+      'clearing an override that does not exist answers 404',
+      nothingToClear.status === 404,
+      `got ${nothingToClear.status}`
+    );
+
+    if (allowWrites) {
+      // The case a single ban flag could not express, and C5's own VERIFY: block one
+      // capability and the other must be untouched. Restored at the end.
+      const me = await call('/auth/me');
+      const myId = me.body?.id;
+      const before = { canSubmit: me.body?.canSubmit, canVote: me.body?.canVote };
+
+      const blocked = await call(`/admin/participants/${myId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ canSubmit: null, canVote: false, note: 'verify-authenticated.mjs' }),
+      });
+      ok('blocking one capability succeeds', blocked.status === 200, `got ${blocked.status}`);
+
+      const after = await call('/auth/me');
+      ok(
+        'canVote goes false and canSubmit is untouched',
+        after.body?.canVote === false && after.body?.canSubmit === before.canSubmit,
+        `canVote ${after.body?.canVote}, canSubmit ${after.body?.canSubmit} (was ${before.canSubmit})`
+      );
+
+      // The gate and the flag have to be the same sentence, so the write must refuse too.
+      const refused = await call('/votes', {
+        method: 'POST',
+        body: JSON.stringify({ submissionId: 1 }),
+      });
+      ok(
+        'POST /votes answers 403 and says an administrator restricted the account',
+        refused.status === 403 && /administrator/i.test(refused.body?.error ?? ''),
+        `got ${refused.status}: ${JSON.stringify(refused.body)}`
+      );
+
+      const listed = await call('/admin/participants');
+      ok(
+        'the override appears in the exception list',
+        (Array.isArray(listed.body) ? listed.body : []).some((p) => p.userId === myId),
+        JSON.stringify(listed.body)
+      );
+
+      const cleared = await call(`/admin/participants/${myId}`, { method: 'DELETE' });
+      ok('clearing the override succeeds', cleared.status === 200, `got ${cleared.status}`);
+
+      const restored = await call('/auth/me');
+      ok(
+        'clearing it hands the account back to the country rule',
+        restored.body?.canVote === before.canVote && restored.body?.canSubmit === before.canSubmit,
+        `canVote ${restored.body?.canVote} (was ${before.canVote})`
+      );
+    } else {
+      skipped('the block/restore round trip', 'it writes an override on your own account — pass --allow-writes');
+    }
+  }
+}
+
 console.log('\n--- rate limiting ---');
 if (allowWrites) {
   // 25 lookups of the same beatmap: the limit is 20 a minute, so the tail must be 429.

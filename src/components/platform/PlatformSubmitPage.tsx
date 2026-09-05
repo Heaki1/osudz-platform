@@ -374,7 +374,7 @@ function LoginGate({ onLogin }: { onLogin?: () => void }) {
         Login with osu!
       </button>
       <p className="text-xs text-slate-600">
-        Only Algerian osu! players can submit beatmaps.
+        Submitting is limited to players from the participating countries.
       </p>
     </div>
   );
@@ -383,6 +383,28 @@ function LoginGate({ onLogin }: { onLogin?: () => void }) {
 // ── PLATFORM SUBMIT PAGE ──────────────────────────────────────────────────────
 
 type SubmitTab = 'url' | 'favorites';
+
+/**
+ * Signed in, but not allowed to submit — either the profile country is not on the
+ * allowlist or an administrator set an override (C5). The page does not restate which,
+ * because it does not know: canSubmit is the resolved verdict, and guessing at the reason
+ * is how the old "Only Algerian osu! players" copy became wrong.
+ */
+function IneligibleGate() {
+  return (
+    <div className="flex flex-col items-center gap-3 py-20 border border-dashed border-slate-800 rounded-2xl">
+      <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center">
+        <AlertCircle className="w-7 h-7 text-slate-700" />
+      </div>
+      <p className="text-white font-bold">Your account cannot submit a beatmap.</p>
+      <p className="text-xs text-slate-500 max-w-md text-center">
+        Eligibility comes from your osu! profile country, read when you log in, and can be
+        granted or withdrawn per player by an administrator. You can still browse, search and
+        favorite beatmaps.
+      </p>
+    </div>
+  );
+}
 
 /** One submission per user per round, so once there is one there is nothing to add. */
 function MySubmission({
@@ -475,7 +497,13 @@ export function PlatformSubmitPage({
         <LoginGate onLogin={onLogin} />
       ) : access.state !== 'open' ? (
         <PhaseGate access={access} round={round} onNavigate={onNavigate} />
+      ) : !user.canSubmit ? (
+        // Before C5 an ineligible player was shown the whole form and learned the answer
+        // from a 403 after picking a beatmap and its requirements. canSubmit is the
+        // server's own verdict, so the page can say so up front.
+        <IneligibleGate />
       ) : loading ? (
+
         <div className="flex items-center gap-3 py-16 justify-center text-slate-600">
           <span className="w-4 h-4 border-2 border-slate-700 border-t-slate-400 rounded-full animate-spin" />
           <span className="text-sm">Checking your submission…</span>

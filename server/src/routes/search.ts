@@ -8,8 +8,9 @@
 // Requiring a session costs a visitor nothing they could act on — searching exists to
 // find a map to favorite or submit, and both of those already need one.
 //
-// requireAuth rather than requireEligible: reading is for everybody, Algerian or not
-// (docs/my_plan.txt), and a search is a read. The DZ gate belongs on the write.
+// requireAuth rather than a capability gate: reading is for everybody, whatever their
+// country (docs/my_plan.txt), and a search is a read. The eligibility rule belongs on the
+// write.
 
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';

@@ -1,11 +1,19 @@
 // Route guards, kept together so the auth contract lives in one place.
 // routes/admin.ts gates its whole router with requireAdmin; submissions and votes
-// mount requireAuth or requireEligible per route.
+// mount requireAuth, requireCanSubmit or requireCanVote per route.
 
 import type { Request, Response, NextFunction } from 'express';
 import { readSession } from '../session.js';
 import { enabledSet } from '../repo/allowedCountries.js';
-import { findByOsuId, isEligible, type UserRow } from '../repo/users.js';
+import { findForUser } from '../repo/participantPermissions.js';
+import {
+  canParticipate,
+  findByOsuId,
+  isEligible,
+  type Capability,
+  type CapabilityOverride,
+  type UserRow,
+} from '../repo/users.js';
 
 declare global {
   namespace Express {
@@ -53,19 +61,22 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 }
 
 /**
- * requireAuth plus the country gate. isEligible lives in repo/users.ts so this gate and
- * the canVote flag on ApiUser cannot disagree about who may vote.
+ * requireAuth plus the COUNTRY rule alone — no per-player override.
  *
- * Two stages, written flat rather than nested, because the country half is async now
- * (C4 moved the countries into a table). Handing requireAuth an async callback would
- * leave a promise nobody awaits, and a rejection inside it would surface as an unhandled
- * rejection rather than a 503.
+ * Used by the challenge, and only by it. The decision recorded in docs/todo.txt E2 is that
+ * the challenge keeps the gate submitting and voting had before C5 split them, and that
+ * gate was the country rule. So a per-player block does not currently reach the challenge.
  *
- * The refusal NAMES the countries. It used to say "Algerian osu! accounts", which stops
- * being true the moment an administrator enables a second country, and a player refused
- * without being told what the rule is has nothing to act on.
+ * FLAGGED, NOT DECIDED: whether it should. An administrator blocking somebody after an
+ * investigation would plausibly expect them out of the challenge too, but C5 names two
+ * capabilities and neither of them is "challenge", so inventing a third here would be
+ * inventing policy. See docs/todo.txt C5.
  */
-export async function requireEligible(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function requireEligibleCountry(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   let authenticated = false;
   await requireAuth(req, res, () => {
     authenticated = true;
@@ -82,13 +93,75 @@ export async function requireEligible(req: Request, res: Response, next: NextFun
   }
 
   if (!req.user || !isEligible(req.user, allowed)) {
-    const list = [...allowed].sort().join(', ');
-    res.status(403).json({
-      error: list
-        ? `Submitting and voting are limited to these countries: ${list}`
-        : 'Submitting and voting are closed — no country is currently enabled',
-    });
+    res.status(403).json({ error: countryRefusal(allowed) });
     return;
   }
   next();
 }
+
+/**
+ * requireAuth plus one capability, resolved through canParticipate so this gate and the
+ * canSubmit / canVote flags on ApiUser are the same sentence rather than two copies.
+ *
+ * Two stages written flat rather than nested: both halves are async now, and handing
+ * requireAuth an async callback would leave a promise nobody awaits, so a rejection inside
+ * it would surface as an unhandled rejection instead of a 503.
+ */
+function requireCapability(capability: Capability) {
+  return async function gate(req: Request, res: Response, next: NextFunction): Promise<void> {
+    let authenticated = false;
+    await requireAuth(req, res, () => {
+      authenticated = true;
+    });
+    if (!authenticated) return;
+
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    let allowed: ReadonlySet<string>;
+    let override: CapabilityOverride | null;
+    try {
+      [allowed, override] = await Promise.all([enabledSet(), findForUser(user.id)]);
+    } catch (err) {
+      console.error('[auth] eligibility read failed:', err instanceof Error ? err.message : err);
+      res.status(503).json({ error: 'Database unavailable' });
+      return;
+    }
+
+    if (canParticipate(capability, user, allowed, override)) {
+      next();
+      return;
+    }
+
+    // Which rule refused matters to the person reading it: "your country is not on the
+    // list" and "an administrator restricted your account" call for different actions.
+    const blocked = capability === 'submit' ? override?.can_submit : override?.can_vote;
+    res.status(403).json({
+      error:
+        blocked === false
+          ? `An administrator has restricted this account from ${capability === 'submit' ? 'submitting' : 'voting'}.`
+          : countryRefusal(allowed),
+    });
+  };
+}
+
+/**
+ * The country refusal NAMES the countries. It used to say "Algerian osu! accounts", which
+ * stops being true the moment an administrator enables a second country, and a player
+ * refused without being told the rule has nothing to act on.
+ */
+function countryRefusal(allowed: ReadonlySet<string>): string {
+  const list = [...allowed].sort().join(', ');
+  return list
+    ? `Submitting and voting are limited to these countries: ${list}`
+    : 'Submitting and voting are closed — no country is currently enabled';
+}
+
+/** The gate for entering a beatmap, and for withdrawing one. */
+export const requireCanSubmit = requireCapability('submit');
+
+/** The gate for casting a vote. Retracting one is requireAuth — see routes/votes.ts. */
+export const requireCanVote = requireCapability('vote');

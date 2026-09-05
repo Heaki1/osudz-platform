@@ -16,11 +16,17 @@ export interface ApiUser {
   globalRank: number | null;
   isAdmin: boolean;
   /**
-   * Whether this account may submit and vote. Computed server-side from the same
-   * rule requireEligible uses, so the client never re-derives eligibility from
-   * `country` and cannot drift from the gate that actually refuses the write.
+   * Whether this account may vote. Computed server-side by the same function the gate
+   * that refuses the write uses, so the client never re-derives eligibility from
+   * `country` and cannot drift from it.
    */
   canVote: boolean;
+  /**
+   * Whether this account may submit. Separate from canVote because an administrator
+   * controls the two independently (C5) — a blocked voter may still be able to enter a
+   * beatmap, and the reverse.
+   */
+  canSubmit: boolean;
 }
 
 export interface ApiRound {
@@ -216,6 +222,55 @@ export interface ApiAllowedCountry {
   addedAt: string;
 }
 
+/**
+ * A per-player permission override — the "exception" an administrator sets after an
+ * investigation (C5).
+ *
+ * Each flag is THREE-VALUED: null means no override for that capability, so the country
+ * allowlist decides it; true grants it; false refuses it. An override wins in both
+ * directions, which is why this is not a ban list.
+ */
+export interface ApiParticipantOverride {
+  canSubmit: boolean | null;
+  canVote: boolean | null;
+  note: string | null;
+  setBy: number | null;
+  setAt: string | null;
+}
+
+/**
+ * One account as the admin Users tab sees it.
+ *
+ * canSubmit and canVote are the EFFECTIVE answers — what the gates would actually decide.
+ * `countryAllowed` and `override` are the two inputs that produced them, so the tab can
+ * show why an account is allowed rather than guessing at it.
+ */
+export interface ApiAdminUser {
+  id: number;
+  osuId: number;
+  username: string;
+  country: string;
+  avatarUrl: string;
+  globalRank: number | null;
+  isAdmin: boolean;
+  canSubmit: boolean;
+  canVote: boolean;
+  countryAllowed: boolean;
+  override: ApiParticipantOverride | null;
+}
+
+/** One override with the account it applies to, for the Eligibility tab's exception list. */
+export interface ApiParticipantException extends ApiParticipantOverride {
+  userId: number;
+  username: string;
+  osuId: number;
+  country: string;
+  avatarUrl: string;
+  /** The administrator who set it, by name; null if their account is gone. */
+  setByName: string | null;
+  setAt: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -375,6 +430,22 @@ export const api = {
         "/admin/round/winner",
         submissionId === undefined ? {} : { submissionId }
       ),
+    /** Every account, with the effective capability flags and any override. */
+    users: () => get<ApiAdminUser[]>("/admin/users"),
+    /** Only the accounts that carry an override — the exception list. */
+    participants: () => get<ApiParticipantException[]>("/admin/participants"),
+    /**
+     * Sets one account's override. Pass null for a capability to leave it to the country
+     * rule; at least one of the two must be true or false, since a row overriding nothing
+     * records nothing.
+     */
+    setParticipant: (
+      userId: number,
+      body: { canSubmit: boolean | null; canVote: boolean | null; note?: string | null }
+    ) => send<{ ok: boolean; override: ApiParticipantOverride }>("PUT", `/admin/participants/${userId}`, body),
+    /** Clears the override, so the country rule applies to that account again. */
+    clearParticipant: (userId: number) =>
+      send<{ ok: boolean }>("DELETE", `/admin/participants/${userId}`),
     /**
      * The country allowlist. Every row, disabled ones included — the admin tab shows
      * both, and a disabled row is a decision rather than an absence.

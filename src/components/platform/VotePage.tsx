@@ -25,7 +25,8 @@ function LoginModal({ onClose, onLogin }: { onClose: () => void; onLogin?: () =>
         </div>
         <h3 className="text-lg font-black text-white mb-2">Login to vote</h3>
         <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-          Only verified Algerian osu! players can vote. Log in with your osu! account to cast your vote.
+          Voting is limited to players from the participating countries. Log in with your osu! account
+          to cast your vote.
         </p>
         <button
           type="button"
@@ -281,7 +282,7 @@ export function VotePage({
     // already cast included. The cards hide their vote button outright when frozen.
     if (frozen) return 'Voting has closed for this round';
     if (!user) return undefined; // A guest gets the login modal instead of a refusal.
-    if (!canVote) return 'Voting is available to Algerian osu! players';
+    if (!canVote) return 'Your account is not eligible to vote in this round';
     if (id === myMapId) return 'You cannot vote for your own submission';
     return undefined;
   };
@@ -318,7 +319,7 @@ export function VotePage({
       <p className="text-sm text-slate-400 max-w-2xl">
         {frozen
           ? 'The ballot is closed and these totals are final. Flip a card to see the challenge it was submitted with.'
-          : "Algerian osu! players get one vote. Flip a card to see challenges. The beatmap with the most votes becomes this month's challenge."}
+          : "Eligible players get one vote. Flip a card to see challenges. The beatmap with the most votes becomes this month's challenge."}
       </p>
     </div>
   );
@@ -439,7 +440,7 @@ export function VotePage({
           <div className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5">
             <Ban className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
             <p className="text-xs font-bold text-slate-400">
-              Voting is available to Algerian osu! players.
+              Your account cannot vote in this round.
             </p>
           </div>
         ) : (
