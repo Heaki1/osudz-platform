@@ -21,6 +21,14 @@ export interface BeatmapComment {
 export interface Beatmap {
   // ── Identity + metadata ──
   id: string;
+  /**
+   * The osu! difficulty id. Absent only on a shape that has none to give.
+   *
+   * `id` above is this app's own key and is not interchangeable with it — a submission's is
+   * its submission id, a search hit's is prefixed. Favoriting addresses the beatmap, so it
+   * needs the osu! id rather than the local one.
+   */
+  difficultyId?: number;
   title: string;
   artist: string;
   mapper: string;

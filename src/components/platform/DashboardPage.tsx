@@ -5,11 +5,10 @@ import { CurrentRound, formatDeadline, isBallotOpen, roundLabel, useCountdown } 
 import { beatmapUrl, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { WithdrawButton } from './WithdrawButton';
-import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';
 import {
   Trophy, Crown, Upload, ChevronRight, RefreshCw,
-  CheckCircle2, AlertCircle, Clock, LogIn, X, Ban, Link as LinkIcon,
+  CheckCircle2, AlertCircle, Clock, LogIn, X, Ban, Heart, Link as LinkIcon,
 } from 'lucide-react';
 
 // ── INLINE LOGIN NUDGE ────────────────────────────────────────────────────────
@@ -578,6 +577,10 @@ interface DashboardPageProps {
   round: CurrentRound | null;
   /** Approved submissions in the open round. Empty until an admin approves one. */
   maps: Beatmap[];
+  /** The caller's favorites, both sources, server-held (A4). Empty when signed out. */
+  favorites: Beatmap[];
+  /** Takes the map, not its id: favoriting addresses the osu! beatmap (A4). */
+  onFavorite: (map: Beatmap) => void;
   /** The signed-in user's own entry, whatever its review status. */
   mySubmission: ApiSubmission | null;
   /** Resolves to an error message, or null once the entry is withdrawn. */
@@ -620,6 +623,8 @@ function NoActiveRound() {
 export function DashboardPage({
   round,
   maps,
+  favorites,
+  onFavorite,
   mySubmission,
   onWithdraw,
   myVote,
@@ -635,14 +640,9 @@ export function DashboardPage({
   user,
   onLogin,
 }: DashboardPageProps) {
-  const [favorites, setFavorites] = useState(favoriteBeatmaps);
   // One ticking countdown for the page, called before the early return below so
   // the hook order never changes. Both the header and the challenge hero use it.
   const countdown = useCountdown(round?.endsAt);
-
-  const toggleFavorite = (id: string) => {
-    setFavorites((prev) => prev.map((b) => (b.id === id ? { ...b, isFavorited: !b.isFavorited } : b)));
-  };
 
   // The vote lives on the server. This page used to keep its own useState for it,
   // which reset on every mount and never agreed with the vote page.
@@ -808,17 +808,29 @@ export function DashboardPage({
                 Load my osu! favorites
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {favorites.map((b) => (
-                <BeatmapCardPlatform
-                  key={b.id}
-                  beatmap={b}
-                  showSubmitButton
-                  onFavorite={() => toggleFavorite(b.id)}
-                  onSubmit={() => onNavigate('submit')}
-                />
-              ))}
-            </div>
+            {favorites.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-14 border border-dashed border-slate-800 rounded-2xl">
+                <Heart className="w-9 h-9 text-slate-700" />
+                <p className="text-slate-500 text-sm font-medium">No favorites yet.</p>
+                <p className="text-xs text-slate-600">
+                  {user
+                    ? 'Favorite a beatmap from Search, or import the ones on your osu! profile.'
+                    : 'Log in to keep a list of beatmaps you like.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {favorites.map((b) => (
+                  <BeatmapCardPlatform
+                    key={b.id}
+                    beatmap={b}
+                    showSubmitButton
+                    onFavorite={() => onFavorite(b)}
+                    onSubmit={() => onNavigate('submit')}
+                  />
+                ))}
+              </div>
+            )}
           </section>
         </div>
       )}

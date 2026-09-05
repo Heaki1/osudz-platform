@@ -143,11 +143,21 @@ async function getAppToken(): Promise<string> {
 const asNumber = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 
+/** Same fields, but the status is whatever osu! reported — see fetchBeatmapAnyStatus. */
+export interface OsuBeatmapAnyStatus extends Omit<OsuBeatmap, 'mapStatus'> {
+  mapStatus: string;
+}
+
 /**
- * Reads one difficulty and flattens it. Throws BeatmapNotFound when osu! has no
- * such difficulty and BeatmapRejected when it exists but cannot be submitted.
+ * Reads one difficulty and flattens it, WHATEVER ITS STATUS. Throws BeatmapNotFound when
+ * osu! has no such difficulty.
+ *
+ * Favorites need this (A4): a player may legitimately favorite a graveyard or pending map,
+ * and the ranked-status rule belongs to the submit path rather than to what somebody is
+ * allowed to like. fetchBeatmap is this plus that rule, so there is one fetch and one
+ * flatten rather than two copies that could disagree about, say, BPM rounding.
  */
-export async function fetchBeatmap(difficultyId: number): Promise<OsuBeatmap> {
+export async function fetchBeatmapAnyStatus(difficultyId: number): Promise<OsuBeatmapAnyStatus> {
   const res = await fetch(`${API_BASE}/beatmaps/${difficultyId}`, {
     headers: { Authorization: `Bearer ${await getAppToken()}`, Accept: 'application/json' },
   });
@@ -160,12 +170,6 @@ export async function fetchBeatmap(difficultyId: number): Promise<OsuBeatmap> {
   const covers = (set.covers ?? {}) as Record<string, unknown>;
 
   const status = typeof b.status === 'string' ? b.status : '';
-  if (!(SUBMITTABLE_STATUSES as readonly string[]).includes(status)) {
-    throw new BeatmapRejected(
-      `This beatmap is ${status || 'of an unknown status'}. Only Ranked, Loved and Approved beatmaps can be submitted.`
-    );
-  }
-
   const beatmapsetId = asNumber(b.beatmapset_id);
   const stars = asNumber(b.difficulty_rating);
   const bpm = asNumber(b.bpm);
@@ -187,7 +191,7 @@ export async function fetchBeatmap(difficultyId: number): Promise<OsuBeatmap> {
     artist,
     mapper,
     difficultyName,
-    mapStatus: status as SubmittableStatus,
+    mapStatus: status,
     coverUrl: typeof covers.cover === 'string' ? covers.cover : '',
     previewUrl: typeof set.preview_url === 'string' ? set.preview_url : '',
     stars: Math.round(stars * 100) / 100,
@@ -198,6 +202,23 @@ export async function fetchBeatmap(difficultyId: number): Promise<OsuBeatmap> {
     od: asNumber(b.accuracy),
     hp: asNumber(b.drain),
   };
+}
+
+/**
+ * Reads one difficulty for the SUBMIT path. Throws BeatmapNotFound when osu! has no such
+ * difficulty and BeatmapRejected when it exists but cannot be submitted.
+ *
+ * The status rule lives here rather than in the fetch, so favorites and search can read
+ * the same beatmap without inheriting a rule that is not theirs.
+ */
+export async function fetchBeatmap(difficultyId: number): Promise<OsuBeatmap> {
+  const beatmap = await fetchBeatmapAnyStatus(difficultyId);
+  if (!(SUBMITTABLE_STATUSES as readonly string[]).includes(beatmap.mapStatus)) {
+    throw new BeatmapRejected(
+      `This beatmap is ${beatmap.mapStatus || 'of an unknown status'}. Only Ranked, Loved and Approved beatmaps can be submitted.`
+    );
+  }
+  return beatmap as OsuBeatmap;
 }
 
 /**

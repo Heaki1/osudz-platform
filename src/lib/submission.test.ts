@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { REVIEW_PRESENTATION, beatmapUrl, searchHitToBeatmap, toBeatmap } from './submission';
-import type { ApiSearchHit, ApiSubmission } from '../api/client';
+import {
+  REVIEW_PRESENTATION,
+  beatmapUrl,
+  favoriteToBeatmap,
+  searchHitToBeatmap,
+  toBeatmap,
+} from './submission';
+import type { ApiFavorite, ApiSearchHit, ApiSubmission } from '../api/client';
 
 const submission = (over: Partial<ApiSubmission> = {}): ApiSubmission => ({
   id: 7,
@@ -140,5 +146,56 @@ describe('beatmapUrl, for a search hit', () => {
     expect(beatmapUrl({ beatmapsetId: 41823, difficultyId: 131891 })).toBe(
       'https://osu.ppy.sh/beatmapsets/41823#osu/131891'
     );
+  });
+});
+
+describe('favoriteToBeatmap', () => {
+  const favorite = (over: Partial<ApiFavorite> = {}): ApiFavorite => ({
+    difficultyId: 4907876,
+    beatmapsetId: 2297621,
+    source: 'dz',
+    title: 'Souzou Forest',
+    artist: 'Kano',
+    mapper: 'Kana Arima',
+    difficultyName: 'Expert',
+    mapStatus: 'ranked',
+    coverUrl: 'https://assets.ppy.sh/cover.jpg',
+    previewUrl: 'https://b.ppy.sh/preview/2297621.mp3',
+    stars: 5.67,
+    bpm: 180,
+    lengthSeconds: 246,
+    favoritedAt: '2026-09-05T10:00:00.000Z',
+    ...over,
+  });
+
+  // The same beatmap can legitimately be favorited from both sources, and the primary key
+  // allows exactly that — so the source has to be part of the React key or the two rows
+  // collide the moment an import lands on top of a community favorite.
+  it('keys on the source as well as the difficulty', () => {
+    expect(favoriteToBeatmap(favorite()).id).toBe('fav-dz-4907876');
+    expect(favoriteToBeatmap(favorite({ source: 'osu' })).id).toBe('fav-osu-4907876');
+  });
+
+  it('carries the difficulty id, which is what favoriting addresses', () => {
+    expect(favoriteToBeatmap(favorite()).difficultyId).toBe(4907876);
+  });
+
+  // A favorite may be graveyard or pending — the ranked-status rule is the submit path's.
+  // Beatmap.status is a three-value union the card's badge is keyed on, so anything outside
+  // it renders as the neutral badge rather than crashing on a missing statusConfig entry.
+  it('folds an unsubmittable status onto the neutral badge', () => {
+    expect(favoriteToBeatmap(favorite({ mapStatus: 'ranked' })).status).toBe('ranked');
+    expect(favoriteToBeatmap(favorite({ mapStatus: 'loved' })).status).toBe('loved');
+    expect(favoriteToBeatmap(favorite({ mapStatus: 'graveyard' })).status).toBe('approved');
+    expect(favoriteToBeatmap(favorite({ mapStatus: 'pending' })).status).toBe('approved');
+    expect(favoriteToBeatmap(favorite({ mapStatus: '' })).status).toBe('approved');
+  });
+
+  it('is favorited by construction — it came out of the favorites table', () => {
+    expect(favoriteToBeatmap(favorite()).isFavorited).toBe(true);
+  });
+
+  it('formats the raw seconds for the card', () => {
+    expect(favoriteToBeatmap(favorite()).length).toBe('4:06');
   });
 });

@@ -11,7 +11,7 @@
 import React, { useEffect, useState } from 'react';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { Search, SlidersHorizontal, Loader2, AlertCircle, LogIn } from 'lucide-react';
-import { BeatmapStatus } from '../../types';
+import { Beatmap, BeatmapStatus } from '../../types';
 import { api, ApiSearchHit } from '../../api/client';
 import { searchHitToBeatmap, beatmapUrl } from '../../lib/submission';
 
@@ -21,7 +21,13 @@ type Sort = 'stars' | 'bpm';
 /** Long enough that typing a title is one request, short enough to feel immediate. */
 const DEBOUNCE_MS = 400;
 
-export function SearchPage() {
+interface SearchPageProps {
+  /** osu! difficulty ids the caller has favorited, so a hit shows its real heart state. */
+  favoritedIds: ReadonlySet<number>;
+  onFavorite: (map: Beatmap) => void;
+}
+
+export function SearchPage({ favoritedIds, onFavorite }: SearchPageProps) {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortBy, setSortBy] = useState<Sort>('stars');
@@ -173,10 +179,13 @@ export function SearchPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {results.map((hit) => (
             <div key={`${hit.beatmapsetId}-${hit.difficultyId}`} className="flex flex-col gap-1.5">
-              {/* onFavorite stays a no-op here. A4 replaces the card's local favorite
-                  state everywhere at once, and wiring one page early would leave two
-                  different behaviours on screen at the same time. */}
-              <BeatmapCardPlatform beatmap={searchHitToBeatmap(hit)} onFavorite={() => {}} />
+              <BeatmapCardPlatform
+                beatmap={{
+                  ...searchHitToBeatmap(hit),
+                  isFavorited: favoritedIds.has(hit.difficultyId),
+                }}
+                onFavorite={() => onFavorite(searchHitToBeatmap(hit))}
+              />
               <div className="flex items-center justify-between px-1">
                 <p className="text-[10px] text-slate-600 font-mono">
                   {hit.difficultyCount > 1

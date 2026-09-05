@@ -214,7 +214,8 @@ interface VotePageProps {
   onTogglePlay: (id: string) => void;
   onScrub: (id: string, e: React.MouseEvent<HTMLDivElement>) => void;
   onVote: (id: string) => void;
-  onFavorite: (id: string) => void;
+  /** Takes the map, not its id: favoriting addresses the osu! beatmap (A4). */
+  onFavorite: (map: Beatmap) => void;
   onNavigate: (page: PlatformPage) => void;
   user: AuthUser | null;
   onLogin?: () => void;
@@ -503,7 +504,7 @@ export function VotePage({
                     onTogglePlay={() => onTogglePlay(beatmap.id)}
                     onScrubAudio={(e) => onScrub(beatmap.id, e)}
                     onVote={() => handleVoteAttempt(beatmap.id)}
-                    onFavorite={() => onFavorite(beatmap.id)}
+                    onFavorite={() => onFavorite(beatmap)}
                     onOpenComments={() => {}}
                     voteBusy={voteBusy === beatmap.id}
                     voteDisabled={refusal(beatmap.id) !== undefined}

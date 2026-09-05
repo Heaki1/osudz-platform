@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { PlatformPage } from '../../types';
+import { Beatmap, PlatformPage } from '../../types';
 import { api, ApiBeatmapPreview, ApiSubmission } from '../../api/client';
 import { CurrentRound, pageAccess, roundLabel } from '../../lib/round';
 import { beatmapUrl, previewToBeatmap, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission';
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
-import { favoriteBeatmaps } from './sampleData';
 import { AuthUser } from './NavHeader';
 import { PhaseGate } from './PhaseGate';
 import { WithdrawButton } from './WithdrawButton';
@@ -243,44 +242,64 @@ function UrlTab({ onSubmitted }: { onSubmitted: (submission: ApiSubmission) => v
 
 // ── FAVORITES TAB ─────────────────────────────────────────────────────────────
 
-function FavoritesTab() {
-  const [selected, setSelected] = useState<string | null>(null);
+interface FavoritesTabProps {
+  /** The caller's favorites, server-held (A4). */
+  favorites: Beatmap[];
+  onFavorite: (map: Beatmap) => void;
+  onSubmitted: (submission: ApiSubmission) => void;
+}
+
+/**
+ * Submitting from a favorite.
+ *
+ * This tab used to be fabricated end to end: six fixture maps, and a Submit button that set
+ * a local `submitted` flag and told the player their beatmap "has been submitted for
+ * community voting" without any request leaving the browser. It now goes through the same
+ * api.submissions.submit the URL tab uses, so the two paths cannot disagree about what a
+ * submission is.
+ */
+function FavoritesTab({ favorites, onFavorite, onSubmitted }: FavoritesTabProps) {
+  const [selected, setSelected] = useState<Beatmap | null>(null);
   const [mod, setMod] = useState<string | null>(null);
   const [challengeType, setChallengeType] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState<string | null>(null);
-  const [favs, setFavs] = useState(favoriteBeatmaps.filter((b) => b.isFavorited));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const selectedBeatmap = favoriteBeatmaps.find((b) => b.id === selected);
+  const reset = () => {
+    setSelected(null);
+    setMod(null);
+    setChallengeType(null);
+    setError(null);
+  };
 
-  if (submitted) {
-    const s = favoriteBeatmaps.find((b) => b.id === submitted);
-    return (
-      <div className="flex flex-col items-center gap-4 py-16 text-center">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
-          <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-        </div>
-        <h3 className="text-xl font-black text-white">Submitted!</h3>
-        <p className="text-sm text-slate-400 max-w-sm">
-          <span className="text-white font-bold">{s?.title}</span> has been submitted for community voting.
-        </p>
-        <button
-          type="button"
-          onClick={() => { setSubmitted(null); setSelected(null); setMod(null); setChallengeType(null); }}
-          className="mt-2 px-6 py-2.5 bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 text-sm font-bold rounded-xl transition-all"
-        >
-          Back to favorites
-        </button>
-      </div>
-    );
-  }
+  const handleSubmit = async () => {
+    // A favorite without a difficulty id cannot be submitted, and there is no such row:
+    // every favorite is stored by difficulty id. The guard is for the type, not the case.
+    if (!selected?.difficultyId || !mod || !challengeType) return;
+    setSubmitting(true);
+    setError(null);
+    const result = await api.submissions.submit({
+      difficultyId: selected.difficultyId,
+      modRequirement: mod,
+      challengeRequirement: challengeType,
+    });
+    setSubmitting(false);
+    if (result.ok) {
+      // The page swaps to MySubmission on this, so there is no local success screen to
+      // keep in step with the server's answer.
+      onSubmitted(result.data);
+      return;
+    }
+    setError(result.error);
+  };
 
-  if (selected && selectedBeatmap) {
+  if (selected) {
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => { setSelected(null); setMod(null); setChallengeType(null); }}
+            onClick={reset}
             className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
           >
             <X className="w-3.5 h-3.5" />
@@ -288,7 +307,7 @@ function FavoritesTab() {
           </button>
         </div>
         <div className="max-w-sm">
-          <BeatmapCardPlatform beatmap={selectedBeatmap} />
+          <BeatmapCardPlatform beatmap={selected} />
         </div>
         <div className="h-px bg-slate-800" />
         <RequirementsSelector
@@ -297,14 +316,20 @@ function FavoritesTab() {
           onModChange={setMod}
           onTypeChange={setChallengeType}
         />
+        {error && (
+          <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
+            <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
+            <p className="text-xs text-rose-300/90">{error}</p>
+          </div>
+        )}
         <button
           type="button"
-          onClick={() => setSubmitted(selected)}
-          disabled={!mod || !challengeType}
+          onClick={() => void handleSubmit()}
+          disabled={!mod || !challengeType || submitting}
           className="flex items-center gap-2 px-6 py-3 bg-amber-400 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black text-sm rounded-xl transition-all"
         >
           <Upload className="w-4 h-4" />
-          Submit to Community Vote
+          {submitting ? 'Submitting…' : 'Submit to Community Vote'}
         </button>
         {(!mod || !challengeType) && (
           <p className="text-[11px] text-slate-600">Select a mod and challenge type to continue.</p>
@@ -315,34 +340,30 @@ function FavoritesTab() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <p className="text-sm text-slate-400">
-          Select a favorited beatmap to submit it for the community vote.
-        </p>
-        <button
-          type="button"
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white text-xs font-bold transition-all"
-        >
-          <Heart className="w-3.5 h-3.5" />
-          Load my osu! favorites
-        </button>
-      </div>
+      <p className="text-sm text-slate-400">
+        Select a favorited beatmap to submit it for the community vote. Only Ranked, Loved and
+        Approved beatmaps can be entered — the server checks that when you submit, so a
+        graveyard favorite is refused there rather than hidden here.
+      </p>
 
-      {favs.length === 0 ? (
+      {favorites.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-16 border border-dashed border-slate-800 rounded-2xl">
           <Heart className="w-10 h-10 text-slate-700" />
           <p className="text-slate-500">No favorited beatmaps yet.</p>
-          <p className="text-xs text-slate-600">Load your osu! favorites or switch to the URL tab.</p>
+          <p className="text-xs text-slate-600">
+            Favorite one from Search, import your osu! favorites from the dashboard, or use the
+            URL tab.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {favs.map((b) => (
+          {favorites.map((b) => (
             <BeatmapCardPlatform
               key={b.id}
               beatmap={b}
               showSubmitButton
-              onSubmit={() => setSelected(b.id)}
-              onFavorite={() => setFavs((prev) => prev.filter((x) => x.id !== b.id))}
+              onSubmit={() => setSelected(b)}
+              onFavorite={() => onFavorite(b)}
             />
           ))}
         </div>
@@ -459,6 +480,10 @@ interface PlatformSubmitPageProps {
   round: CurrentRound | null;
   /** The caller's entry in the open round, fetched once in App. */
   mySubmission: ApiSubmission | null;
+  /** The caller's favorites, both sources, server-held (A4). */
+  favorites: Beatmap[];
+  /** Takes the map, not its id: favoriting addresses the osu! beatmap (A4). */
+  onFavorite: (map: Beatmap) => void;
   loading: boolean;
   onSubmitted: (submission: ApiSubmission) => void;
   /** Resolves to an error message, or null once the entry is withdrawn. */
@@ -470,6 +495,8 @@ interface PlatformSubmitPageProps {
 
 export function PlatformSubmitPage({
   round,
+  favorites,
+  onFavorite,
   mySubmission,
   loading,
   onSubmitted,
@@ -543,7 +570,9 @@ export function PlatformSubmitPage({
           </div>
 
           {tab === 'url'       && <UrlTab onSubmitted={onSubmitted} />}
-          {tab === 'favorites' && <FavoritesTab />}
+          {tab === 'favorites' && (
+            <FavoritesTab favorites={favorites} onFavorite={onFavorite} onSubmitted={onSubmitted} />
+          )}
         </>
       )}
     </div>

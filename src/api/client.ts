@@ -271,6 +271,33 @@ export interface ApiParticipantException extends ApiParticipantOverride {
   setAt: string;
 }
 
+/**
+ * One favorited beatmap.
+ *
+ * TWO SOURCES, ONE LIST. 'dz' is a map favorited on this site, 'osu' is one imported from
+ * the player's osu! profile. They are presented together and distinguished by source; an
+ * import never overwrites a 'dz' row, which the primary key enforces server-side.
+ *
+ * mapStatus is a plain string here, unlike everywhere else: a favorite may be graveyard or
+ * pending, because the ranked-status rule belongs to the submit path.
+ */
+export interface ApiFavorite {
+  difficultyId: number;
+  beatmapsetId: number;
+  source: "dz" | "osu";
+  title: string;
+  artist: string;
+  mapper: string;
+  difficultyName: string;
+  mapStatus: string;
+  coverUrl: string;
+  previewUrl: string;
+  stars: number;
+  bpm: number;
+  lengthSeconds: number;
+  favoritedAt: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -395,6 +422,21 @@ export const api = {
         "GET",
         `/search/beatmaps?${new URLSearchParams(params).toString()}`
       ),
+  },
+
+  // ── Favorites ──────────────────────────────────────────────────────────────
+  favorites: {
+    /** The caller's favorites, both sources, newest first. [] when signed out. */
+    list: () => get<ApiFavorite[]>("/favorites"),
+    /**
+     * Favorites a beatmap as source 'dz'. The server looks the beatmap up itself, so the
+     * id is all this sends — metadata in a request body is metadata a request can invent.
+     */
+    add: (difficultyId: number) =>
+      send<{ ok: boolean; favorite: ApiFavorite }>("PUT", `/favorites/${difficultyId}`),
+    /** Removes it across BOTH sources — the heart means "not in my favorites here". */
+    remove: (difficultyId: number) =>
+      send<{ ok: boolean; removed: number }>("DELETE", `/favorites/${difficultyId}`),
   },
 
   // ── Admin ──────────────────────────────────────────────────────────────────

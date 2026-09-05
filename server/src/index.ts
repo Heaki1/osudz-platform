@@ -10,6 +10,7 @@ import votesRouter from './routes/votes.js';
 import adminRouter from './routes/admin.js';
 import challengeRouter from './routes/challenge.js';
 import searchRouter from './routes/search.js';
+import favoritesRouter from './routes/favorites.js';
 
 const app = express();
 const PORT = parseInt(process.env.API_PORT ?? '3001', 10);
@@ -27,6 +28,7 @@ app.use('/api/submissions', submissionsRouter);
 app.use('/api/votes', votesRouter);
 app.use('/api/challenge', challengeRouter);
 app.use('/api/search', searchRouter);
+app.use('/api/favorites', favoritesRouter);
 app.use('/api/admin', adminRouter);
 
 // ── Fallbacks ────────────────────────────────────────────────────────────────

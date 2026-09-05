@@ -6,12 +6,13 @@
 // beatmapsetId or the review state. So the seam needs this small mapper rather
 // than a cast.
 
-import { ApiBeatmapPreview, ApiSearchHit, ApiSubmission } from '../api/client';
+import { ApiBeatmapPreview, ApiFavorite, ApiSearchHit, ApiSubmission } from '../api/client';
 import { Beatmap } from '../types';
 
 export function toBeatmap(submission: ApiSubmission): Beatmap {
   return {
     id: String(submission.id),
+    difficultyId: submission.difficultyId,
     title: submission.title,
     artist: submission.artist,
     mapper: submission.mapper,
@@ -84,6 +85,7 @@ export const formatLength = (seconds: number): string =>
 export function previewToBeatmap(preview: ApiBeatmapPreview): Beatmap {
   return {
     id: `preview-${preview.difficultyId}`,
+    difficultyId: preview.difficultyId,
     title: preview.title,
     artist: preview.artist,
     mapper: preview.mapper,
@@ -111,6 +113,7 @@ export function previewToBeatmap(preview: ApiBeatmapPreview): Beatmap {
 export function searchHitToBeatmap(hit: ApiSearchHit): Beatmap {
   return {
     id: `search-${hit.difficultyId}`,
+    difficultyId: hit.difficultyId,
     title: hit.title,
     artist: hit.artist,
     mapper: hit.mapper,
@@ -121,5 +124,34 @@ export function searchHitToBeatmap(hit: ApiSearchHit): Beatmap {
     status: hit.mapStatus,
     coverUrl: hit.coverUrl,
     previewUrl: hit.previewUrl || undefined,
+  };
+}
+
+/**
+ * A favorite, shaped for the same card the rest of the app renders.
+ *
+ * mapStatus is a free string on ApiFavorite, because a favorite may be graveyard or
+ * pending, while Beatmap.status is the three-value union the card's badge is keyed on.
+ * Anything outside that union renders as 'approved' — the neutral badge — rather than
+ * crashing the card on a missing statusConfig entry.
+ */
+export function favoriteToBeatmap(favorite: ApiFavorite): Beatmap {
+  const status: Beatmap['status'] =
+    favorite.mapStatus === 'ranked' || favorite.mapStatus === 'loved' ? favorite.mapStatus : 'approved';
+
+  return {
+    id: `fav-${favorite.source}-${favorite.difficultyId}`,
+    difficultyId: favorite.difficultyId,
+    title: favorite.title,
+    artist: favorite.artist,
+    mapper: favorite.mapper,
+    difficultyName: favorite.difficultyName,
+    stars: favorite.stars,
+    bpm: favorite.bpm,
+    length: formatLength(favorite.lengthSeconds),
+    status,
+    coverUrl: favorite.coverUrl,
+    previewUrl: favorite.previewUrl || undefined,
+    isFavorited: true,
   };
 }

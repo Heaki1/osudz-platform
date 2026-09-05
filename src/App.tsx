@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { NavHeader, AuthUser } from './components/platform/NavHeader';
 import { DashboardPage } from './components/platform/DashboardPage';
 import { VotePage } from './components/platform/VotePage';
@@ -6,9 +6,9 @@ import { SearchPage } from './components/platform/SearchPage';
 import { AdminDashboard } from './components/platform/AdminDashboard';
 import { PlatformSubmitPage } from './components/platform/PlatformSubmitPage';
 import { ArchivePage } from './components/platform/ArchivePage';
-import { api, ApiChallengeScore, ApiSubmission, ApiUser } from './api/client';
+import { api, ApiChallengeScore, ApiFavorite, ApiSubmission, ApiUser } from './api/client';
 import { CurrentRound, toCurrentRound } from './lib/round';
-import { toBeatmap } from './lib/submission';
+import { favoriteToBeatmap, toBeatmap } from './lib/submission';
 import { Beatmap, Phase, PlatformPage } from './types';
 
 type PlayState = { id: string; progress: number; audio?: HTMLAudioElement };
@@ -40,6 +40,9 @@ export default function App() {
   const [challengeLoaded, setChallengeLoaded] = useState(false);
   /** The caller's own recorded score for the open round, or null. */
   const [myScore, setMyScore] = useState<ApiChallengeScore | null>(null);
+  /** The caller's favorites, both sources. Empty when signed out. */
+  const [favorites, setFavorites] = useState<ApiFavorite[]>([]);
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [playState, setPlayState] = useState<PlayState | null>(null);
 
@@ -48,24 +51,42 @@ export default function App() {
   // their actual behaviour off `round` being null.
   const phase: Phase = round?.phase ?? 'submission';
 
+  /**
+   * Derived rather than stored on each map. isFavorited used to be written onto `maps` in
+   * refresh, which meant favoriting something re-read the favorites and left every card
+   * still claiming the old answer until the next full refresh.
+   */
+  const favoritedIds = useMemo(() => new Set(favorites.map((f) => f.difficultyId)), [favorites]);
+  const favoriteMaps = useMemo(() => favorites.map(favoriteToBeatmap), [favorites]);
+  const mapsWithFavorites = useMemo(
+    () =>
+      maps.map((m) => ({
+        ...m,
+        isFavorited: m.difficultyId !== undefined && favoritedIds.has(m.difficultyId),
+      })),
+    [maps, favoritedIds]
+  );
+
   // Round, approved submissions, the caller's own entry, their vote and the challenge
   // leaderboard travel together: approving an entry, casting a vote, importing a score
   // or advancing a phase changes several of them at once, so everything reloads as a
   // set. The per-caller reads answer 401 when signed out and client.ts maps a failed
   // read to null, so asking for them before the session is known is safe.
   const refresh = useCallback(async () => {
-    const [current, submissions, mine, vote, scores, score] = await Promise.all([
+    const [current, submissions, mine, vote, scores, score, favs] = await Promise.all([
       api.rounds.current(),
       api.submissions.list(),
       api.submissions.mine(),
       api.votes.my(),
       api.challenge.scores(),
       api.challenge.my(),
+      api.favorites.list(),
     ]);
     // isVoted is per-caller, so it is applied here rather than in toBeatmap.
     const votedId = vote?.submissionId ?? null;
     setRound(toCurrentRound(current));
     setMaps((submissions ?? []).map((s) => ({ ...toBeatmap(s), isVoted: s.id === votedId })));
+    setFavorites(favs ?? []);
     setMySubmission(mine);
     setMyVote(votedId);
     // The server already ordered these by the round's challenge requirement, so they
@@ -194,8 +215,27 @@ export default function App() {
     return null;
   };
 
-  const handleFavorite = (id: string) => {
-    setMaps((prev) => prev.map((m) => (m.id === id ? { ...m, isFavorited: !m.isFavorited } : m)));
+  /**
+   * Favoriting addresses the BEATMAP, so it needs the osu! difficulty id rather than the
+   * app's own key — a submission's Beatmap.id is its submission id and a search hit's is
+   * prefixed, so neither can be handed to the API.
+   */
+  const handleFavorite = async (map: Beatmap) => {
+    const difficultyId = map.difficultyId;
+    if (difficultyId === undefined) return;
+
+    const result = favoritedIds.has(difficultyId)
+      ? await api.favorites.remove(difficultyId)
+      : await api.favorites.add(difficultyId);
+
+    if (!result.ok) {
+      setFavoriteError(result.error);
+      return;
+    }
+    setFavoriteError(null);
+    // Re-read rather than patch: the server decides what a favorite row holds, and an
+    // add refreshes the stored metadata as well as creating the row.
+    setFavorites((await api.favorites.list()) ?? []);
   };
 
   return (
@@ -227,11 +267,26 @@ export default function App() {
         </div>
       )}
 
+      {favoriteError && (
+        <div className="bg-rose-500/10 border-b border-rose-500/30 px-6 py-2.5 flex items-center justify-between gap-4">
+          <p className="text-xs text-rose-300">{favoriteError}</p>
+          <button
+            type="button"
+            onClick={() => setFavoriteError(null)}
+            className="text-[10px] font-bold text-rose-300/70 hover:text-rose-200 transition-colors flex-shrink-0"
+          >
+            DISMISS
+          </button>
+        </div>
+      )}
+
       <main>
         {platformPage === 'dashboard' && (
           <DashboardPage
             round={round}
-            maps={maps}
+            maps={mapsWithFavorites}
+            favorites={favoriteMaps}
+            onFavorite={handleFavorite}
             mySubmission={mySubmission}
             onWithdraw={handleWithdraw}
             myVote={myVote}
@@ -250,7 +305,7 @@ export default function App() {
         )}
         {platformPage === 'vote' && (
           <VotePage
-            maps={maps}
+            maps={mapsWithFavorites}
             round={round}
             mySubmissionId={mySubmission?.id ?? null}
             loading={!loaded}
@@ -268,11 +323,15 @@ export default function App() {
             onLogin={handleLogin}
           />
         )}
-        {platformPage === 'search' && <SearchPage />}
+        {platformPage === 'search' && (
+          <SearchPage favoritedIds={favoritedIds} onFavorite={handleFavorite} />
+        )}
         {platformPage === 'submit' && (
           <PlatformSubmitPage
             round={round}
             mySubmission={mySubmission}
+            favorites={favoriteMaps}
+            onFavorite={handleFavorite}
             loading={!loaded}
             onSubmitted={setMySubmission}
             onWithdraw={handleWithdraw}

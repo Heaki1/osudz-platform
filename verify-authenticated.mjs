@@ -491,6 +491,68 @@ console.log('--- per-player permissions (C5) ---');
   }
 }
 
+console.log('');
+console.log('--- favorites (A4) ---');
+{
+  const list = await call('/favorites');
+  ok(
+    'GET /favorites returns the caller list',
+    list.status === 200 && Array.isArray(list.body),
+    `got ${list.status}: ${JSON.stringify(list.body).slice(0, 160)}`
+  );
+
+  const badId = await call('/favorites/nope', { method: 'PUT' });
+  ok('a non-numeric difficulty id answers 400', badId.status === 400, `got ${badId.status}`);
+
+  const missing = await call('/favorites/999999999', { method: 'DELETE' });
+  ok(
+    'removing a beatmap that is not favorited answers 404',
+    missing.status === 404,
+    `got ${missing.status}`
+  );
+
+  if (allowWrites) {
+    // Souzou Forest [Expert] — the difficulty this instance already has a submission for.
+    const id = 4907876;
+    const started = (Array.isArray(list.body) ? list.body : []).some((f) => f.difficultyId === id);
+
+    const added = await call(`/favorites/${id}`, { method: 'PUT' });
+    ok('favoriting a real beatmap succeeds', added.status === 200, `got ${added.status}`);
+    ok(
+      'the row comes back with the metadata a card needs',
+      added.body?.favorite?.title &&
+        added.body?.favorite?.source === 'dz' &&
+        Number.isFinite(added.body?.favorite?.stars),
+      JSON.stringify(added.body?.favorite)
+    );
+
+    // A4's VERIFY: favoriting the same map twice must not create a second row.
+    const again = await call(`/favorites/${id}`, { method: 'PUT' });
+    const after = await call('/favorites');
+    const rows = (Array.isArray(after.body) ? after.body : []).filter((f) => f.difficultyId === id);
+    ok('favoriting twice does not create a second row', again.status === 200 && rows.length === 1, `${rows.length} rows`);
+
+    // A graveyard map is a legitimate favorite even though it cannot be submitted — the
+    // ranked-status rule belongs to the submit path, not to what somebody may like.
+    const graveyard = await call('/favorites/75', { method: 'PUT' });
+    ok(
+      'an unsubmittable beatmap can still be favorited',
+      graveyard.status === 200,
+      `got ${graveyard.status}: ${JSON.stringify(graveyard.body)}`
+    );
+    if (graveyard.status === 200) await call('/favorites/75', { method: 'DELETE' });
+
+    if (!started) {
+      const gone = await call(`/favorites/${id}`, { method: 'DELETE' });
+      ok('unfavoriting removes it, leaving the list as it was', gone.status === 200, `got ${gone.status}`);
+    } else {
+      skipped('the unfavorite step', 'that beatmap was already favorited before this run');
+    }
+  } else {
+    skipped('the favorite round trip', 'it writes favorites — pass --allow-writes');
+  }
+}
+
 console.log('\n--- rate limiting ---');
 if (allowWrites) {
   // 25 lookups of the same beatmap: the limit is 20 a minute, so the tail must be 429.

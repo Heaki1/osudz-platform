@@ -42,7 +42,10 @@ export function BeatmapCardPlatform({
   voteDisabled,
   voteDisabledReason,
 }: BeatmapCardPlatformProps) {
-  const [favorited, setFavorited] = useState(beatmap.isFavorited ?? false);
+  // Read from the beatmap, never held locally. A4 moved favorites to the server, and a
+  // local copy was the reason a heart filled in and then came back empty on reload — the
+  // card was reporting its own optimism rather than what was stored.
+  const favorited = beatmap.isFavorited ?? false;
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -96,7 +99,6 @@ export function BeatmapCardPlatform({
   };
 
   const handleFavorite = () => {
-    setFavorited((f) => !f);
     onFavorite?.();
   };
 
