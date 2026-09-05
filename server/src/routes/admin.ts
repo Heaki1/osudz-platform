@@ -34,6 +34,7 @@ import {
 import {
   findById as findUserById,
   findByOsuId,
+  revokeSessions,
   listAllWithOverrides,
   toApiAdminUser,
 } from '../repo/users.js';
@@ -975,6 +976,37 @@ router.post('/round/correction', async (req, res) => {
     res.json({ ok: true, round: toApiRound(outcome.round) });
   } catch (err) {
     fail(res, err, 'result correction');
+  }
+});
+
+// POST /api/admin/users/:userId/revoke — end every session an account holds (G6).
+//
+// The administrator half of the same mechanism. C5's per-capability blocks are forward-only
+// and do not touch a session already in flight, which is exactly the gap G6 records: an
+// account blocked mid-round keeps whatever page it already has open until its cookie expires.
+// This ends that immediately.
+//
+// Deliberately SEPARATE from setting a block rather than folded into it. A revocation signs
+// somebody out of every device, which is a different act from refusing them a vote, and
+// bundling the two would mean an administrator adjusting one capability silently kicked the
+// player out of the site.
+
+router.post('/users/:userId/revoke', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    res.status(400).json({ error: 'userId must be a positive integer' });
+    return;
+  }
+
+  try {
+    const epoch = await revokeSessions(userId);
+    if (epoch === null) {
+      res.status(404).json({ error: 'No such account' });
+      return;
+    }
+    res.json({ ok: true, sessionEpoch: epoch });
+  } catch (err) {
+    fail(res, err, 'session revocation');
   }
 });
 

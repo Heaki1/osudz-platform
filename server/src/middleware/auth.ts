@@ -3,7 +3,7 @@
 // mount requireAuth, requireCanSubmit or requireCanVote per route.
 
 import type { Request, Response, NextFunction } from 'express';
-import { readSession } from '../session.js';
+import { readSessionClaims } from '../session.js';
 import { enabledSet } from '../repo/allowedCountries.js';
 import { findForUser } from '../repo/participantPermissions.js';
 import {
@@ -25,15 +25,15 @@ declare global {
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const osuId = readSession(req);
-  if (osuId === null) {
+  const claims = readSessionClaims(req);
+  if (claims === null) {
     res.status(401).json({ error: 'Not authenticated' });
     return;
   }
 
   let user: UserRow | null;
   try {
-    user = await findByOsuId(osuId);
+    user = await findByOsuId(claims.osuId);
   } catch (err) {
     console.error('[auth] user lookup failed:', err instanceof Error ? err.message : err);
     res.status(503).json({ error: 'Database unavailable' });
@@ -43,6 +43,15 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   if (!user) {
     // Signed cookie for an account that no longer exists — treat as signed out.
     res.status(401).json({ error: 'Session no longer valid' });
+    return;
+  }
+
+  // G6. The cookie is still perfectly signed; it is simply older than the account's current
+  // revocation epoch, which is what "this session has been ended" means without a session
+  // table. Checked on EVERY authenticated request, because that is the only place a stateless
+  // cookie can be refused.
+  if (claims.epoch !== user.session_epoch) {
+    res.status(401).json({ error: 'This session has been signed out. Log in again.' });
     return;
   }
 

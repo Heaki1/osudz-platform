@@ -10,6 +10,7 @@ const user = (country: string): UserRow => ({
   avatar_url: null,
   global_rank: null,
   is_admin: false,
+  session_epoch: 0,
 });
 
 /** What repo/allowedCountries.ts enabledSet() hands over: normalised, upper case. */

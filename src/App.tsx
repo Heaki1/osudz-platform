@@ -49,7 +49,12 @@ export default function App() {
   const [myScore, setMyScore] = useState<ApiChallengeScore | null>(null);
   /** The caller's favorites, both sources. Empty when signed out. */
   const [favorites, setFavorites] = useState<ApiFavorite[]>([]);
-  const [favoriteError, setFavoriteError] = useState<string | null>(null);
+  /**
+   * The last write that failed, for the banner. Shared rather than one state per action: a
+   * failed favorite and a failed sign-out are both "that did not happen, here is why", and the
+   * banner reads the same either way.
+   */
+  const [actionError, setActionError] = useState<string | null>(null);
   /** The administrator-defined submission rules (C8, C9). Null until the first read. */
   const [settings, setSettings] = useState<ApiSiteSettings | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -136,6 +141,21 @@ export default function App() {
     // Leaving the admin page on logout, so a stale admin view cannot linger.
     setPlatformPage((page) => (page === 'admin' ? 'dashboard' : page));
     // Drops the previous account's own submission along with the session.
+    void refresh();
+  };
+
+  /**
+   * Ends every session this account holds (G6). The tab that asked keeps working — the server
+   * hands back a fresh cookie — so this reads as "sign my other devices out", which is what
+   * somebody who thinks a cookie was taken actually wants.
+   */
+  const handleLogoutEverywhere = async () => {
+    const result = await api.auth.logoutEverywhere();
+    if (!result.ok) {
+      setActionError(result.error);
+      return;
+    }
+    setActionError(null);
     void refresh();
   };
 
@@ -240,10 +260,10 @@ export default function App() {
       : await api.favorites.add(difficultyId);
 
     if (!result.ok) {
-      setFavoriteError(result.error);
+      setActionError(result.error);
       return;
     }
-    setFavoriteError(null);
+    setActionError(null);
     // Re-read rather than patch: the server decides what a favorite row holds, and an
     // add refreshes the stored metadata as well as creating the row.
     setFavorites((await api.favorites.list()) ?? []);
@@ -273,6 +293,7 @@ export default function App() {
         user={platformUser}
         onLogin={handleLogin}
         onLogout={handleLogout}
+        onLogoutEverywhere={handleLogoutEverywhere}
       />
 
       {authError && (
@@ -292,12 +313,12 @@ export default function App() {
         </div>
       )}
 
-      {favoriteError && (
+      {actionError && (
         <div className="bg-rose-500/10 border-b border-rose-500/30 px-6 py-2.5 flex items-center justify-between gap-4">
-          <p className="text-xs text-rose-300">{favoriteError}</p>
+          <p className="text-xs text-rose-300">{actionError}</p>
           <button
             type="button"
-            onClick={() => setFavoriteError(null)}
+            onClick={() => setActionError(null)}
             className="text-[10px] font-bold text-rose-300/70 hover:text-rose-200 transition-colors flex-shrink-0"
           >
             DISMISS

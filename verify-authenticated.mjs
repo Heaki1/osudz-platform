@@ -766,5 +766,52 @@ if (allowWrites) {
   skipped('the rate-limit check', 'it makes 25 lookup requests — pass --allow-writes to run it');
 }
 
+console.log('');
+console.log('--- session revocation (G6) — LAST, because it revokes this cookie ---');
+{
+  const me = await call('/auth/me');
+  ok('the session works before anything is revoked', me.status === 200 && me.body !== null, `got ${me.status}`);
+
+  const badId = await call('/admin/users/nope/revoke', { method: 'POST' });
+  if (badId.status === 403) {
+    skipped('the admin revocation checks', 'this session is not an administrator');
+  } else {
+    ok('a non-numeric userId answers 400', badId.status === 400, `got ${badId.status}`);
+    const noSuch = await call('/admin/users/999999/revoke', { method: 'POST' });
+    ok('an account that does not exist answers 404', noSuch.status === 404, `got ${noSuch.status}`);
+  }
+
+  if (allowWrites) {
+    // The whole point of G6. The server hands the caller a fresh cookie, so the BROWSER stays
+    // signed in — but this script keeps sending the original string, which is now one epoch
+    // behind. That is exactly the stolen-cookie case, and it must stop working.
+    const before = await call('/auth/me');
+    const revoked = await call('/auth/logout-all', { method: 'POST' });
+    ok('POST /auth/logout-all succeeds', revoked.status === 200, `got ${revoked.status}`);
+
+    const after = await call('/auth/me');
+    ok(
+      'the cookie this script holds is now refused, which is the stolen-cookie case',
+      after.status === 200 && after.body === null,
+      `got ${after.status}: ${JSON.stringify(after.body)}`
+    );
+
+    const gated = await call('/favorites');
+    ok(
+      'a gated route refuses the revoked cookie and says why',
+      gated.status === 401 && /signed out/i.test(gated.body?.error ?? ''),
+      `got ${gated.status}: ${JSON.stringify(gated.body)}`
+    );
+
+    console.log('');
+    console.log('      NOTE: the cookie you pasted is now revoked, on purpose — that IS the check.');
+    console.log('      Your browser is unaffected: the server issued it a fresh cookie. To run');
+    console.log('      this script again, copy the new osudz_session value out of DevTools.');
+    console.log(`      (the session belonged to: ${before.body?.username ?? 'unknown'})`);
+  } else {
+    skipped('the revocation round trip', 'it invalidates the cookie you pasted — pass --allow-writes');
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
 process.exit(fail === 0 ? 0 : 1);

@@ -67,9 +67,20 @@ interface NavHeaderProps {
   user?: AuthUser | null;
   onLogin?: () => void;
   onLogout?: () => void;
+  /** Ends every session this account holds (G6), not just this browser's. */
+  onLogoutEverywhere?: () => void;
 }
 
-export function NavHeader({ page, phase, round, onNavigate, user, onLogin, onLogout }: NavHeaderProps) {
+export function NavHeader({
+  page,
+  phase,
+  round,
+  onNavigate,
+  user,
+  onLogin,
+  onLogout,
+  onLogoutEverywhere,
+}: NavHeaderProps) {
   const cfg = phaseConfig[phase];
   const countdown = useCountdown(round?.endsAt);
   /**
@@ -186,6 +197,17 @@ export function NavHeader({ page, phase, round, onNavigate, user, onLogin, onLog
               >
                 <LogOut className="w-3.5 h-3.5" />
                 Log out
+              </button>
+              {/* G6. A stolen cookie is valid for thirty days and the plain logout cannot
+                  reach it, so this is the only control that actually ends it. */}
+              <button
+                type="button"
+                onClick={onLogoutEverywhere}
+                title="Signs out every browser and device this account is logged in on."
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-slate-500 hover:text-rose-400 hover:bg-rose-500/5 transition-all text-left border-t border-slate-800"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Log out everywhere
               </button>
             </div>
           </div>

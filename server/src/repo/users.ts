@@ -16,9 +16,15 @@ export interface UserRow {
   avatar_url: string | null;
   global_rank: number | null;
   is_admin: boolean;
+  /**
+   * Revocation epoch (G6). Sealed into the session cookie and compared on every
+   * authenticated request, so incrementing it invalidates every cookie this account holds.
+   */
+  session_epoch: number;
 }
 
-const COLUMNS = 'id, osu_id, username, country_code, avatar_url, global_rank, is_admin';
+const COLUMNS =
+  'id, osu_id, username, country_code, avatar_url, global_rank, is_admin, session_epoch';
 
 /**
  * Whether this account may submit and vote. docs/my_plan.txt: players from the
@@ -207,4 +213,19 @@ export function toApiAdminUser(row: UserWithOverrideRow, allowedCountries: Reado
         }
       : null,
   };
+}
+
+/**
+ * Ends every session this account holds (G6), by moving its revocation epoch past whatever
+ * the cookies in circulation were sealed with.
+ *
+ * Returns the new epoch, so the caller revoking their OWN sessions can be handed a fresh
+ * cookie in the same response instead of being signed out of the tab they clicked in.
+ */
+export async function revokeSessions(userId: number): Promise<number | null> {
+  const { rows } = await pool.query<{ session_epoch: number }>(
+    'UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1 RETURNING session_epoch',
+    [userId]
+  );
+  return rows[0]?.session_epoch ?? null;
 }

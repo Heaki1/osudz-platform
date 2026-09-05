@@ -19,9 +19,10 @@ import {
   readSession,
   clearSession,
 } from '../session.js';
+import { requireAuth } from '../middleware/auth.js';
 import { enabledSet } from '../repo/allowedCountries.js';
 import { findForUser } from '../repo/participantPermissions.js';
-import { upsertFromOsu, findByOsuId, toApiUser } from '../repo/users.js';
+import { upsertFromOsu, findByOsuId, revokeSessions, toApiUser } from '../repo/users.js';
 
 const router = Router();
 
@@ -47,7 +48,9 @@ router.get('/callback', async (req, res) => {
     if (me.is_restricted) return fail('account_restricted');
 
     const user = await upsertFromOsu(me);
-    setSession(res, Number(user.osu_id));
+    // The cookie carries the account's current revocation epoch (G6), so a session minted
+    // before a revocation is not accepted after it.
+    setSession(res, Number(user.osu_id), user.session_epoch);
     return res.redirect(env.publicBaseUrl);
   } catch (err) {
     console.error('[auth] callback failed:', err instanceof Error ? err.message : err);
@@ -77,6 +80,31 @@ router.get('/me', async (req, res) => {
 router.post('/logout', (_req, res) => {
   clearSession(res);
   res.json({ ok: true });
+});
+
+// POST /api/auth/logout-all — end every session this account holds (G6).
+//
+// The plain logout only clears this browser's cookie, which is all a stateless session can do
+// locally: a copy taken from another device stays valid for its full thirty days. This moves
+// the account's revocation epoch, so every cookie minted before now is refused on its next
+// request — the thing the scheme could not do at all before.
+//
+// The caller is then handed a FRESH cookie rather than being signed out of the tab they
+// clicked in. Ending your other sessions and ending this one are different intentions, and the
+// second already has a button.
+router.post('/logout-all', requireAuth, async (req, res) => {
+  try {
+    const epoch = await revokeSessions(req.user!.id);
+    if (epoch === null) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+    setSession(res, Number(req.user!.osu_id), epoch);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth] revoke failed:', err instanceof Error ? err.message : err);
+    res.status(503).json({ error: 'Database unavailable' });
+  }
 });
 
 export default router;

@@ -1655,6 +1655,7 @@ function UsersTab() {
   const [users, setUsers] = useState<ApiAdminUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const rows = await api.admin.users();
@@ -1696,6 +1697,20 @@ function UsersTab() {
     await load();
   };
 
+  const revoke = async (u: ApiAdminUser) => {
+    setBusy(u.id);
+    const res = await api.admin.revokeSessions(u.id);
+    setBusy(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError(null);
+    // Its own state rather than the error banner: a revocation that worked is not a failure,
+    // and reporting it in red would teach an administrator to ignore the red box.
+    setNotice(`Signed ${u.username} out of every device. They stay out until they log in again.`);
+  };
+
   const needle = q.trim().toLowerCase();
   const shown = (users ?? []).filter(
     (u) => needle === '' || u.username.toLowerCase().includes(needle) || String(u.osuId).includes(needle)
@@ -1707,6 +1722,12 @@ function UsersTab() {
         <div className="flex items-start gap-2.5 bg-rose-500/8 border border-rose-500/25 rounded-xl px-4 py-3">
           <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-px" />
           <p className="text-xs text-rose-300/90">{error}</p>
+        </div>
+      )}
+      {notice && (
+        <div className="flex items-start gap-2.5 bg-emerald-500/8 border border-emerald-500/25 rounded-xl px-4 py-3">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-px" />
+          <p className="text-xs text-emerald-300/90">{notice}</p>
         </div>
       )}
 
@@ -1739,7 +1760,7 @@ function UsersTab() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
-                {['Player', 'Country', 'Rank', 'Submit', 'Vote', 'Note'].map((h) => (
+                {['Player', 'Country', 'Rank', 'Submit', 'Vote', 'Note', 'Sessions'].map((h) => (
                   <th key={h} className="text-left text-[10px] uppercase tracking-wider text-slate-600 font-mono px-5 py-3">
                     {h}
                   </th>
@@ -1800,6 +1821,21 @@ function UsersTab() {
                   </td>
                   <td className="px-5 py-3 text-[11px] text-slate-500 max-w-[16rem] truncate">
                     {u.override?.note ?? ''}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    {/* G6. Separate from the capability controls: a revocation signs somebody
+                        out of every device, which is a different act from refusing them a
+                        vote, and folding it into a block would kick a player out of the site
+                        as a side effect of adjusting one switch. */}
+                    <button
+                      type="button"
+                      disabled={busy === u.id}
+                      onClick={() => void revoke(u)}
+                      title="Ends every session this account holds. They stay signed out until they log in again."
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-lg border bg-slate-800 border-slate-700 hover:border-rose-500/50 text-slate-400 hover:text-rose-400 transition-all disabled:opacity-40"
+                    >
+                      Sign out
+                    </button>
                   </td>
                 </tr>
               ))}
