@@ -202,6 +202,13 @@ export interface ApiVoteAudit {
   submissionArtist: string;
   difficultyName: string;
   castAt: string;
+  /**
+   * When the vote was last moved (B9). Equal to castAt until it is moved, so a vote that
+   * changed is distinguishable from one that was cast and left alone.
+   *
+   * Only the time is recorded, not the previous choice — that would need a history table.
+   */
+  movedAt: string;
 }
 
 

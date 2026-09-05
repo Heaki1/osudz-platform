@@ -345,12 +345,25 @@ function BallotModeration({ round }: { round: CurrentRound }) {
                     voted for {row.submissionArtist} - {row.submissionTitle} [{row.difficultyName}]
                   </p>
                 </div>
-                <span className="text-[10px] font-mono text-slate-600 flex-shrink-0">
-                  {new Date(row.castAt).toLocaleString(undefined, {
-                    dateStyle: 'short',
-                    timeStyle: 'short',
-                  })}
-                </span>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-[10px] font-mono text-slate-600">
+                    {new Date(row.castAt).toLocaleString(undefined, {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                    })}
+                  </p>
+                  {/* B9. A vote that moved is the case this view exists to investigate, so it
+                      is marked rather than left for someone to notice by comparing columns. */}
+                  {row.movedAt !== row.castAt && (
+                    <p className="text-[10px] font-mono text-amber-400/80">
+                      moved{' '}
+                      {new Date(row.movedAt).toLocaleString(undefined, {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>

@@ -16,9 +16,11 @@ export interface VoteRow {
   user_id: number;
   submission_id: number;
   created_at: Date;
+  /** When the vote was last moved. Equal to created_at until the first move (B9). */
+  updated_at: Date;
 }
 
-const COLUMNS = 'id, round_id, user_id, submission_id, created_at';
+const COLUMNS = 'id, round_id, user_id, submission_id, created_at, updated_at';
 
 export async function findByUserAndRound(
   userId: number,
@@ -38,8 +40,10 @@ export async function findByUserAndRound(
  * impossible, and DO UPDATE turns "change my vote" into one statement with no
  * read-modify-write race between two tabs.
  *
- * A change keeps the original created_at — votes has no updated_at column, so when
- * someone last moved their vote is not recorded anywhere.
+ * A change keeps the original created_at and stamps updated_at (B9), so "voted early and
+ * stuck with it" and "switched at the last minute" are distinguishable after the fact. Only
+ * the TIME is recorded, not the previous choice: recovering what the vote used to be needs a
+ * history table, which B9 did not ask for and which nothing yet reads.
  */
 export async function cast(
   roundId: number,
@@ -50,7 +54,8 @@ export async function cast(
     `INSERT INTO votes (round_id, user_id, submission_id)
      VALUES ($1, $2, $3)
      ON CONFLICT (round_id, user_id) DO UPDATE SET
-       submission_id = EXCLUDED.submission_id
+       submission_id = EXCLUDED.submission_id,
+       updated_at    = now()
      RETURNING ${COLUMNS}`,
     [roundId, userId, submissionId]
   );
@@ -86,6 +91,7 @@ export interface VoteAuditRow {
   submission_artist: string;
   difficulty_name: string;
   created_at: Date;
+  updated_at: Date;
 }
 
 /** Every vote in one round, with who cast it and what for. Newest first. */
@@ -101,7 +107,8 @@ export async function listForRound(roundId: number): Promise<VoteAuditRow[]> {
             s.title        AS submission_title,
             s.artist       AS submission_artist,
             s.difficulty_name,
-            v.created_at
+            v.created_at,
+            v.updated_at
        FROM votes v
        JOIN users u       ON u.id = v.user_id
        JOIN submissions s ON s.id = v.submission_id
@@ -126,5 +133,8 @@ export function toApiVoteAudit(row: VoteAuditRow) {
     submissionArtist: row.submission_artist,
     difficultyName: row.difficulty_name,
     castAt: row.created_at.toISOString(),
+    // B9. Equal to castAt until the vote is moved, so the panel can mark the ones that
+    // changed — which is the case an administrator opening this view is looking for.
+    movedAt: row.updated_at.toISOString(),
   };
 }
