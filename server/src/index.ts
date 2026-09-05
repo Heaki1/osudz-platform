@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
@@ -15,7 +18,21 @@ import settingsRouter from './routes/settings.js';
 import commentsRouter from './routes/comments.js';
 
 const app = express();
-const PORT = parseInt(process.env.API_PORT ?? '3001', 10);
+
+/**
+ * API_PORT first, then PORT.
+ *
+ * API_PORT is this repo's own name for it and the one server/.env.example documents. PORT is
+ * what a container host injects, and it has to be honoured or the platform's health check
+ * hits a port nothing is listening on. API_PORT wins because PORT is already spoken for
+ * locally — vite.config.ts:35 reads it for the CLIENT on 8443, so preferring it here would
+ * put both processes on one port for anyone who exports it.
+ *
+ * `||` rather than `??` on purpose. An environment variable that exists and is empty is how a
+ * host expresses "unset", and `??` would accept that empty string, hand parseInt a '' and
+ * bind a random port instead of falling through to the next name.
+ */
+const PORT = parseInt(process.env.API_PORT || process.env.PORT || '3001', 10);
 
 // One origin, with credentials. env.ts validates it and refuses to boot in production
 // without it, rather than silently allowing localhost on a deployed host.
@@ -34,6 +51,47 @@ app.use('/api/favorites', favoritesRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/comments', commentsRouter);
 app.use('/api/admin', adminRouter);
+
+// ── The built client, when it is deployed beside this server ─────────────────
+//
+// SINGLE ORIGIN IS NOT A PREFERENCE HERE, IT IS A REQUIREMENT. src/api/client.ts:397 calls
+// the API at the relative path '/api', and session.ts:72 marks the cookie sameSite 'lax',
+// which a browser will not send on a cross-site fetch. Split across two hostnames the login
+// would appear to succeed and every request after it would answer 401. Serving the bundle
+// from this process is what makes the one origin.
+//
+// LOCAL DEVELOPMENT IS UNAFFECTED. Vite serves the client on 8443 and proxies /api here, so
+// the directory below does not exist, serveClient is false, and none of this runs. The
+// default sits beside the compiled server — server/dist/index.js resolves ../public — which
+// is also where the Dockerfile puts it.
+const clientDist = process.env.CLIENT_DIST
+  ? path.resolve(process.env.CLIENT_DIST)
+  : path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../public');
+const serveClient = existsSync(path.join(clientDist, 'index.html'));
+
+if (serveClient) {
+  // index: false so the static layer never answers '/' itself — the fallback below owns
+  // that, and one place deciding what '/' means is easier to reason about than two.
+  app.use(express.static(clientDist, { index: false, maxAge: '1h' }));
+
+  /**
+   * Every non-API GET renders the SPA.
+   *
+   * The /api guard is the whole point of doing this by hand rather than with a catch-all
+   * route: an unknown /api path MUST keep falling through to the JSON 404 below. G2 made
+   * that contract, verify-public.mjs asserts it ("an unknown path answers 404 with { error }"
+   * — and it is JSON, not an Express HTML page), and answering index.html there would hand
+   * the client HTML to parse as JSON. Restricted to GET for the same reason: a POST to a
+   * mistyped path is a bug worth a 404, not a page.
+   */
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || /^\/api(\/|$)/.test(req.path)) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
 
 // ── Fallbacks ────────────────────────────────────────────────────────────────
 //
@@ -78,4 +136,9 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 
 app.listen(PORT, () => {
   console.log(`osudz API listening on http://localhost:${PORT}`);
+  // Said out loud because the two deployments differ in exactly this, and a single-origin
+  // container that quietly failed to find its bundle would look like a routing bug.
+  console.log(
+    serveClient ? `  serving the client from ${clientDist}` : '  no client bundle — API only'
+  );
 });

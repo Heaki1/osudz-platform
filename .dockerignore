@@ -1,0 +1,37 @@
+# Belt and braces: every COPY in the Dockerfile names its source, so nothing here is load
+# bearing on its own. It keeps the build context small and makes a stray secret two mistakes
+# away from the image rather than one.
+
+.git
+.gitignore
+.gitattributes
+node_modules
+server/node_modules
+dist
+server/dist
+build
+.vite
+
+# Secrets. Never in an image.
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
+
+# Not part of the running app.
+docs
+plans
+session
+verify-public.mjs
+verify-authenticated.mjs
+vitest.client.config.ts
+vitest.server.config.ts
+**/*.test.ts
+**/*.test.tsx
+Dockerfile
+.dockerignore
+*.log
+.DS_Store
+Thumbs.db
