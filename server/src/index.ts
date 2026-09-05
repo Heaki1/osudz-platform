@@ -12,6 +12,7 @@ import challengeRouter from './routes/challenge.js';
 import searchRouter from './routes/search.js';
 import favoritesRouter from './routes/favorites.js';
 import settingsRouter from './routes/settings.js';
+import commentsRouter from './routes/comments.js';
 
 const app = express();
 const PORT = parseInt(process.env.API_PORT ?? '3001', 10);
@@ -31,6 +32,7 @@ app.use('/api/challenge', challengeRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/favorites', favoritesRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/comments', commentsRouter);
 app.use('/api/admin', adminRouter);
 
 // ── Fallbacks ────────────────────────────────────────────────────────────────

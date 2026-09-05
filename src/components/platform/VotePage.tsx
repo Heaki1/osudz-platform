@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BeatmapCard } from '../BeatmapCard';
-import { Beatmap, PlatformPage } from '../../types';
+import { Beatmap, BeatmapComment, PlatformPage } from '../../types';
+import { api } from '../../api/client';
+import { groupBySubmission } from '../../lib/comments';
 import { CurrentRound, isBallotOpen, pageAccess, roundLabel, useCountdown } from '../../lib/round';
 import { AuthUser, phaseConfig } from './NavHeader';
 import { PhaseGate } from './PhaseGate';
@@ -251,6 +253,47 @@ export function VotePage({
   // Whether this page is live at all comes from the one table in lib/round.ts, so the
   // nav tab, this body and the server's phase check cannot disagree.
   const access = pageAccess('vote', round);
+  /**
+   * The round's discussion, grouped by submission (B8).
+   *
+   * Fetched by this page rather than through App's refresh: a comment changes only this page,
+   * and putting it in the shared refresh would reload the round, the submissions, the vote and
+   * the leaderboard every time somebody typed a sentence.
+   */
+  const [comments, setComments] = useState<Map<number, BeatmapComment[]>>(new Map());
+
+  const loadComments = useCallback(async () => {
+    const rows = await api.comments.forRound(round?.id);
+    setComments(groupBySubmission(rows ?? []));
+  }, [round?.id]);
+
+  useEffect(() => {
+    void loadComments();
+  }, [loadComments]);
+
+  /**
+   * Posts a comment and re-reads. Re-reading rather than splicing the new one in locally: the
+   * server decides the id, the timestamp and the threading, and a local copy of any of those
+   * is how the old panel ended up showing comments that did not exist.
+   *
+   * A vote-page Beatmap.id IS its submission id (toBeatmap makes it so), which is what makes
+   * this addressable at all.
+   */
+  const addComment = async (
+    map: Beatmap,
+    body: string,
+    parentId?: string
+  ): Promise<string | null> => {
+    const res = await api.comments.post(
+      Number(map.id),
+      body,
+      parentId === undefined ? undefined : Number(parentId)
+    );
+    if (!res.ok) return res.error;
+    await loadComments();
+    return null;
+  };
+
   const canVote = user?.canVote ?? false;
   // Beatmap ids are strings; submission ids are numbers.
   const myMapId = mySubmissionId === null ? null : String(mySubmissionId);
@@ -498,14 +541,15 @@ export function VotePage({
                     </div>
                   )}
                   <BeatmapCard
-                    beatmap={beatmap}
+                    beatmap={{ ...beatmap, comments: comments.get(Number(beatmap.id)) ?? [] }}
                     isPlaying={playingId === beatmap.id}
                     audioProgress={audioProgress(beatmap.id)}
                     onTogglePlay={() => onTogglePlay(beatmap.id)}
                     onScrubAudio={(e) => onScrub(beatmap.id, e)}
                     onVote={() => handleVoteAttempt(beatmap.id)}
                     onFavorite={() => onFavorite(beatmap)}
-                    onOpenComments={() => {}}
+                    onAddComment={(body, parentId) => addComment(beatmap, body, parentId)}
+                    canComment={user !== null}
                     voteBusy={voteBusy === beatmap.id}
                     voteDisabled={refusal(beatmap.id) !== undefined}
                     voteDisabledReason={refusal(beatmap.id)}

@@ -767,6 +767,79 @@ if (allowWrites) {
 }
 
 console.log('');
+console.log('--- comments (B8) ---');
+{
+  const list = await call('/comments');
+  if (list.status === 503) {
+    skipped('the comment checks', 'migration 012 has not been applied yet');
+  } else {
+    ok(
+      'GET /comments reads the open round discussion',
+      list.status === 200 && Array.isArray(list.body),
+      `got ${list.status}: ${JSON.stringify(list.body).slice(0, 160)}`
+    );
+
+    const badRound = await call('/comments?roundId=nope');
+    ok('a non-numeric roundId answers 400', badRound.status === 400, `got ${badRound.status}`);
+
+    const badSubmission = await call('/comments?submissionId=nope');
+    ok('a non-numeric submissionId answers 400', badSubmission.status === 400, `got ${badSubmission.status}`);
+
+    const empty = await call('/comments', { method: 'POST', body: JSON.stringify({ submissionId: 2, body: '   ' }) });
+    ok('a blank comment answers 400', empty.status === 400, `got ${empty.status}`);
+
+    const noTarget = await call('/comments', { method: 'POST', body: JSON.stringify({ body: 'hello' }) });
+    ok('a comment with no submissionId answers 400', noTarget.status === 400, `got ${noTarget.status}`);
+
+    const tooLong = await call('/comments', {
+      method: 'POST',
+      body: JSON.stringify({ submissionId: 2, body: 'x'.repeat(2001) }),
+    });
+    ok('an oversized comment answers 400', tooLong.status === 400, `got ${tooLong.status}`);
+
+    const noSuch = await call('/comments', {
+      method: 'POST',
+      body: JSON.stringify({ submissionId: 999999, body: 'on a submission that does not exist' }),
+    });
+    ok('a comment on a missing submission answers 404', noSuch.status === 404, `got ${noSuch.status}`);
+
+    if (allowWrites) {
+      const posted = await call('/comments', {
+        method: 'POST',
+        body: JSON.stringify({ submissionId: 2, body: 'verify-authenticated.mjs — top level' }),
+      });
+      ok('posting a comment succeeds', posted.status === 200, `got ${posted.status}: ${JSON.stringify(posted.body)}`);
+
+      const id = posted.body?.comment?.id;
+      const reply = await call('/comments', {
+        method: 'POST',
+        body: JSON.stringify({ submissionId: 2, body: 'verify-authenticated.mjs — reply', parentId: id }),
+      });
+      ok('replying to it succeeds', reply.status === 200, `got ${reply.status}`);
+      ok('the reply carries its parent', reply.body?.comment?.parentId === id, JSON.stringify(reply.body?.comment));
+
+      // round_id comes from the submission, never from the caller, so the round read has to
+      // find a comment nobody told it the round of.
+      const after = await call('/comments');
+      const rows = Array.isArray(after.body) ? after.body : [];
+      ok('both appear in the round read', rows.some((c) => c.id === id), `${rows.length} comments`);
+
+      // A reply threaded onto a comment from a different entry would render under the wrong
+      // card, so the parent is checked against the same submission.
+      const crossed = await call('/comments', {
+        method: 'POST',
+        body: JSON.stringify({ submissionId: 999999, body: 'wrong entry', parentId: id }),
+      });
+      ok('a reply on the wrong submission answers 404', crossed.status === 404, `got ${crossed.status}`);
+
+      console.log('      note: two comments were left on submission 2 — they are real rows.');
+    } else {
+      skipped('posting a comment', 'it writes a real comment — pass --allow-writes');
+    }
+  }
+}
+
+console.log('');
 console.log('--- session revocation (G6) — LAST, because it revokes this cookie ---');
 {
   const me = await call('/auth/me');

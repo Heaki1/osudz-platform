@@ -363,6 +363,24 @@ export interface ApiResultCorrection {
   correctedAt: string;
 }
 
+/**
+ * One comment on a submission (B8).
+ *
+ * parentId is the comment being replied to, or null for a top-level one. The panel renders a
+ * reply directly under its parent rather than a tree, so one level is what the shape supports
+ * in practice even though the column would allow more.
+ */
+export interface ApiComment {
+  id: number;
+  submissionId: number;
+  parentId: number | null;
+  userId: number;
+  username: string;
+  avatarUrl: string;
+  body: string;
+  createdAt: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -520,6 +538,28 @@ export const api = {
      */
     import: () =>
       send<{ ok: boolean; imported: number; favorites: ApiFavorite[] }>("POST", "/favorites/import"),
+  },
+
+  // ── Comments ───────────────────────────────────────────────────────────────
+  comments: {
+    /**
+     * A round's whole discussion, oldest first. Defaults to the open round.
+     *
+     * One request for a page of a dozen cards, grouped by submission on the client — a request
+     * per card would be a dozen round trips to render one page.
+     */
+    forRound: (roundId?: number) =>
+      get<ApiComment[]>(roundId === undefined ? "/comments" : `/comments?roundId=${roundId}`),
+    /** One entry's discussion, oldest first. */
+    forSubmission: (submissionId: number) =>
+      get<ApiComment[]>(`/comments?submissionId=${submissionId}`),
+    /** Posts a comment, or a reply when parentId is given. requireAuth, not eligibility. */
+    post: (submissionId: number, body: string, parentId?: number) =>
+      send<{ ok: boolean; comment: ApiComment }>(
+        "POST",
+        "/comments",
+        parentId === undefined ? { submissionId, body } : { submissionId, body, parentId }
+      ),
   },
 
   // ── Settings ───────────────────────────────────────────────────────────────

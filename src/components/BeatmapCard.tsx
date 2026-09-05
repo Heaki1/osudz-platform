@@ -14,7 +14,17 @@ interface BeatmapCardProps {
   onScrubAudio: (e: React.MouseEvent<HTMLDivElement>) => void;
   onVote: () => void;
   onFavorite: () => void;
-  onOpenComments: () => void;
+  /**
+   * Posts a comment, or a reply when a parent id is given (B8). Resolves to an error message,
+   * or null on success.
+   *
+   * The card does NOT keep the result. It used to hold localComments, which is why a comment
+   * looked posted and was gone on reload; the list now arrives on beatmap.comments and the
+   * page that owns the fetch re-reads after a successful write.
+   */
+  onAddComment?: (body: string, parentId?: string) => Promise<string | null>;
+  /** Whether the caller can comment at all — commenting needs a session, not eligibility. */
+  canComment?: boolean;
   /** A cast or retract for this card is in flight. */
   voteBusy?: boolean;
   /** This card may not be voted for at all — a self-vote, or voting is closed. */
@@ -35,16 +45,21 @@ const ratingColors = [
 
 export const BeatmapCard: React.FC<BeatmapCardProps> = ({
   beatmap, isPlaying, audioProgress,
-  onTogglePlay, onScrubAudio, onVote, onFavorite, onOpenComments,
+  onTogglePlay, onScrubAudio, onVote, onFavorite,
+  onAddComment, canComment = false,
   voteBusy, voteDisabled, voteDisabledReason, showVoteButton = true,
 }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [spinClass, setSpinClass] = useState('');
   const [showComments, setShowComments] = useState(false);
-  const [localComments, setLocalComments] = useState<BeatmapComment[]>(beatmap.comments ?? []);
   const [newComment, setNewComment] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+
+  // From the server, through the page that fetched it. Never a local copy — that was the bug.
+  const localComments: BeatmapComment[] = beatmap.comments ?? [];
   const spinRef = useRef<(() => void) | null>(null);
 
   const isHighDifficulty = beatmap.stars >= 4.2;
@@ -79,37 +94,33 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
     setIsFlipped((f) => !f);
   };
 
-  const handleSubmitComment = () => {
+  const handleSubmitComment = async () => {
     const text = newComment.trim();
-    if (!text) return;
-    const comment: BeatmapComment = {
-      id: Date.now().toString(),
-      user: 'you',
-      avatar: '',
-      time: 'just now',
-      text,
-      rating: undefined,
-    };
-    setLocalComments((prev) => [comment, ...prev]);
+    if (!text || !onAddComment) return;
+    setCommentBusy(true);
+    const error = await onAddComment(text);
+    setCommentBusy(false);
+    if (error !== null) {
+      setCommentError(error);
+      return;
+    }
+    setCommentError(null);
     setNewComment('');
   };
 
-  const handleSubmitReply = (parentId: string) => {
+  const handleSubmitReply = async (parentId: string) => {
     const text = replyText.trim();
-    if (!text) return;
-    const reply: BeatmapComment = {
-      id: Date.now().toString(),
-      user: 'you',
-      avatar: '',
-      time: 'just now',
-      text: `@${localComments.find((c) => c.id === parentId)?.user ?? 'user'} ${text}`,
-    };
-    setLocalComments((prev) => {
-      const idx = prev.findIndex((c) => c.id === parentId);
-      const next = [...prev];
-      next.splice(idx + 1, 0, reply);
-      return next;
-    });
+    if (!text || !onAddComment) return;
+    setCommentBusy(true);
+    // The "@name" prefix is gone: the reply is threaded under its parent by parent_id now, so
+    // repeating the name in the body was decoration that also ended up stored forever.
+    const error = await onAddComment(text, parentId);
+    setCommentBusy(false);
+    if (error !== null) {
+      setCommentError(error);
+      return;
+    }
+    setCommentError(null);
     setReplyText('');
     setReplyingTo(null);
   };
@@ -266,7 +277,16 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                 <span className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
                   {localComments.length} comment{localComments.length !== 1 ? 's' : ''}
                 </span>
+                {/* Anyone signed in may comment, whatever their country: my_plan.txt grants
+                    discussion to players who cannot vote, so this deliberately does not
+                    mention eligibility. */}
+                {!canComment && (
+                  <span className="text-[10px] text-slate-600">Log in to join the discussion</span>
+                )}
               </div>
+              {commentError && (
+                <p className="text-[10px] text-rose-400/90 mb-1.5">{commentError}</p>
+              )}
 
               {/* Comment list */}
               <div className="flex-1 overflow-y-auto space-y-2 pb-2 pr-0.5" style={{ scrollbarWidth: 'thin' }}>
@@ -314,13 +334,14 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                           type="text"
                           value={replyText}
                           onChange={(e) => setReplyText(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitReply(c.id); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') void handleSubmitReply(c.id); }}
                           placeholder={`Reply to ${localComments.find((x) => x.id === c.id)?.user ?? 'user'}…`}
                           className="flex-1 bg-slate-950/60 border border-slate-800 rounded-md px-2 py-1 text-[10px] text-slate-300 placeholder-slate-600 focus:outline-none focus:border-slate-600"
                         />
                         <button
                           type="button"
-                          onClick={() => handleSubmitReply(c.id)}
+                          onClick={() => void handleSubmitReply(c.id)}
+                          disabled={commentBusy}
                           className="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
                         >
                           <Send className="w-2.5 h-2.5" />
@@ -340,14 +361,16 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                   type="text"
                   value={newComment}
                   onChange={(e) => setNewComment(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitComment(); }}
-                  placeholder="Add a comment…"
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleSubmitComment(); }}
+                  disabled={!canComment || commentBusy}
+                  placeholder={canComment ? 'Add a comment…' : 'Log in to comment'}
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-400/60 transition-colors"
                 />
                 <button
                   type="button"
-                  onClick={handleSubmitComment}
-                  className="px-2.5 rounded-xl bg-amber-400 text-slate-950 hover:bg-amber-300 transition-colors flex-shrink-0"
+                  onClick={() => void handleSubmitComment()}
+                  disabled={!canComment || commentBusy}
+                  className="px-2.5 rounded-xl bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>
@@ -386,8 +409,9 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                // The panel used to notify the page it had opened, for a lazy load that
+                // never existed; the round's whole discussion arrives with the page now (B8).
                 setShowComments((v) => !v);
-                onOpenComments();
               }}
               className={`px-2.5 py-2 rounded-lg border text-xs font-semibold transition-all flex items-center gap-1.5 ${
                 showComments
