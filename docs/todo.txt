@@ -10,23 +10,22 @@
 # answered. What is left is two things only the owner can do, both named below. Nothing in
 # this file is waiting on a decision, and no migration is pending.
 
-  LAST CODE 5e11f6fcc40ca6b05fa45c1831d075077c5fd200
-            5e11f6f "test: commit the unauthenticated API sweep as a script"
+  LAST CODE 0aa4c88 "feat: let an admin skip a voting phase with no ballot"
   HEAD      the docs commit carrying this checkpoint, which cannot name its own hash.
             `git log -1 --oneline` is the authority; expect a docs subject on top of the
             commit above.
   BRANCH    main
   TREE      clean — nothing uncommitted, nothing stashed
-  BASELINE  1bcad8e, 43 commits back
+  BASELINE  1bcad8e, 45 commits back
 
   VERIFICATION AT THIS COMMIT, all green:
     npm run typecheck                 PASS   (client)
     cd server && npm run typecheck    PASS
-    npm run build                     PASS   379 kB, 101 kB gzipped
-    npm test                          99 passed (43 client, 56 server)
-    node verify-public.mjs            63 passed, 0 failed
+    npm run build                     PASS   384 kB, 103 kB gzipped
+    npm test                          105 passed (43 client, 62 server)
+    node verify-public.mjs            64 passed, 0 failed
     node verify-public.mjs http://localhost:8443/api
-                                      63 passed, 0 failed — same contract through the
+                                      64 passed, 0 failed — same contract through the
                                       client dev-server proxy, which is the origin a
                                       browser actually uses
   MIGRATIONS  001-012, ALL APPLIED. Nothing pending.
@@ -105,6 +104,9 @@
 
 ## COMMITS THIS SESSION, newest first
 
+  0aa4c88  feat: let an admin skip a voting phase with no ballot            C10
+  87e5edc  docs: stop the checkpoint claiming a hash it cannot know
+  f9a8f7e  docs: close the last open question and record the final pass
   5e11f6f  test: commit the unauthenticated API sweep as a script            H2
   5e95cc7  feat: let an unambiguous block reach the challenge                 C5 last loose end
   8523ee4  docs: close out the roadmap — every implementation item is done
@@ -172,15 +174,24 @@
                             ballot on winnerStatus while the phase stays 'voting'. sweep:
                             401 on cast and retract. session: cast, move, retract, and the
                             409 once winner_status leaves 'none'.
+  the EMPTY ballot (C10)    unit: refuseSkipVoting, 6 cases including the refusal order and
+                            that it agrees with canTransition. sweep: 401 on
+                            POST /admin/round/skip-voting. session: an admin caller is still
+                            refused while the round has approved entries, and the refusal
+                            leaves the round exactly where it was — which is the guard, and
+                            the only part that can be checked without ending a live round.
   winner approval           unit: canTransition, including the one move a deadline may NOT
                             make — voting to challenge, which only an approval does.
                             session: approve, and the refusals.
   tiebreak                  not unit-testable: closeVoting and approveWinner do their work
                             in SQL inside a transaction with FOR UPDATE. session covers the
                             refusals; a real tie needs two entries (see H6).
-  phase transitions         unit: canTransition for every legal and illegal move. The
-                            automatic half runs inside findCurrent, so it needs a due
-                            deadline — nothing is due here, so it is confirmed as a no-op.
+  phase transitions         unit: canTransition for every legal and illegal move, plus the
+                            empty-ballot escape above. The automatic half runs inside
+                            findCurrent, so it needs a due deadline — nothing is due here, so
+                            it is confirmed as a no-op. Note the clock deliberately STOPS on
+                            an empty ballot rather than advancing: that is a choice about the
+                            month, not about the time.
   challenge scores          unit: splitMods, qualifies, orderFor — including that three of
                             the four requirements live in the ORDER, not in a flag.
   challenge eligibility     unit: canEnterChallenge, 6 cases. sweep: 401. session with
@@ -300,11 +311,11 @@
 
   From C:\Users\heaki\Desktop\newdz
 
-    git log -1 --oneline          # a docs commit on top of 5e11f6f
+    git log -1 --oneline          # a docs commit on top of 0aa4c88
     git status --short            # expect empty
     npm run typecheck             # client
     cd server && npm run typecheck && cd ..
-    npm test                      # expect 43 + 56 passing
+    npm test                      # expect 43 + 62 passing
     npm run build
     cd server && pnpm run migrate:status   # expect 12 applied, 0 pending
 
@@ -313,7 +324,7 @@
     pnpm run dev                  # client on :8443, from the repo root
 
   Then, with it up:
-    node verify-public.mjs                          # 63 checks, no session needed
+    node verify-public.mjs                          # 64 checks, no session needed
     node verify-public.mjs http://localhost:8443/api   # same, through the client proxy
     node verify-authenticated.mjs "<cookie>"        # the other half — see above
 
