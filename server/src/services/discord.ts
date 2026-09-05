@@ -61,6 +61,23 @@ export function announcePhase(
   announce(line);
 }
 
+/**
+ * A round ended with nothing to vote on.
+ *
+ * Its own announcement rather than announcePhase's archive line, which would say the round
+ * "is over and has been archived" and leave the community to guess why. A month with no
+ * entries is worth saying out loud — it is the one outcome where there is no winner to
+ * announce later and no challenge to join.
+ */
+export function announceVotingSkipped(
+  round: { round_number: number; month: string; year: number }
+): void {
+  announce(
+    `📭 **${label(round)}** — no entries were approved, so there was nothing to vote on. ` +
+      'An administrator has closed the round with no winner and no challenge.'
+  );
+}
+
 export function announceBallotClosed(
   round: { round_number: number; month: string; year: number },
   outcome: { tied: number[]; votes: number | null; total: number | null }

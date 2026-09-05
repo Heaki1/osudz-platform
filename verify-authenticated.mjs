@@ -194,6 +194,54 @@ if (user.isAdmin) {
     skipped('the voting -> challenge bypass check', `the round is in the ${round.phase} phase`);
   }
 
+  // ── the empty-ballot escape ─────────────────────────────────────────────────
+  //
+  // POST /admin/round/skip-voting ENDS the round, so this only sends it when the round
+  // provably has approved entries — in which case the server must refuse. That makes the
+  // check safe to run unconditionally AND makes it the real test of the guard: the refusal
+  // is the whole safety property, since without it this route could discard a live ballot.
+  {
+    const entries = await call('/admin/submissions');
+    const approved = (Array.isArray(entries.body) ? entries.body : []).filter(
+      (row) => row.reviewStatus === 'approved'
+    ).length;
+
+    if (round.phase !== 'voting') {
+      const wrongPhase = await call('/round/skip-voting', { method: 'POST' });
+      // The route is under /admin; the path above is deliberately wrong, so this also
+      // confirms it is not exposed outside the admin router.
+      ok(
+        'skip-voting does not exist outside /admin',
+        wrongPhase.status === 404,
+        `got ${wrongPhase.status}`
+      );
+      const outOfPhase = await call('/admin/round/skip-voting', { method: 'POST' });
+      ok(
+        'POST /admin/round/skip-voting refuses a round that is not voting',
+        outOfPhase.status === 409 && /phase/i.test(outOfPhase.body?.error ?? ''),
+        `got ${outOfPhase.status}: ${JSON.stringify(outOfPhase.body)}`
+      );
+    } else if (approved > 0) {
+      const guarded = await call('/admin/round/skip-voting', { method: 'POST' });
+      ok(
+        'POST /admin/round/skip-voting refuses a round that has a real ballot',
+        guarded.status === 409 && /approved/i.test(guarded.body?.error ?? ''),
+        `got ${guarded.status}: ${JSON.stringify(guarded.body)}`
+      );
+      const still = await call('/rounds/current');
+      ok(
+        'and the refusal left the round exactly where it was',
+        still.body?.phase === round.phase && still.body?.winnerStatus === round.winnerStatus,
+        `phase ${still.body?.phase}, winnerStatus ${still.body?.winnerStatus}`
+      );
+    } else {
+      skipped(
+        'the skip-voting guard check',
+        'this round has NO approved entries, so the call would legitimately end it'
+      );
+    }
+  }
+
   const badScore = await call('/admin/challenge/scores', {
     method: 'POST',
     body: JSON.stringify({ osuId: user.osuId, score: -1, accuracy: 50, misses: 0 }),

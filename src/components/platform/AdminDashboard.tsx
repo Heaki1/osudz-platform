@@ -19,7 +19,7 @@ import {
   Shield, ChevronRight, CheckCircle2, Circle, Clock,
   Star, Music2, AlertCircle, Users, Settings, Zap,
   ToggleLeft, ToggleRight, Plus, X, Globe, Inbox, Link as LinkIcon,
-  Trophy, Scale, Eye,
+  Trophy, Scale, Eye, AlertTriangle, SkipForward,
 } from 'lucide-react';
 
 // ── TAB TYPES ────────────────────────────────────────────────────────────────
@@ -542,6 +542,160 @@ function CorrectionPanel({
   );
 }
 
+// ── THE EMPTY BALLOT ─────────────────────────────────────────────────────────
+//
+// A round can reach voting with nothing approved: nobody entered, or everything entered was
+// rejected. The server refuses to count that ballot and the clock stops on it, so the round
+// used to sit in voting with a "Close Voting & Count the Ballot" button that could only
+// answer 409 and a countdown that changed nothing when it expired.
+//
+// This panel says what is actually wrong and offers the one move that is honest. RoundControl
+// renders it INSTEAD OF the close-ballot button, and only when nothing is approved, so the
+// normal close/approve/tiebreak flow is untouched — one approved entry and this never appears.
+//
+// It distinguishes the two ways to get here, because they call for different actions: with
+// entries awaiting review the fix is usually to review them, and skipping would throw away
+// somebody's submission. Skipping is still offered, since an administrator may have rejected
+// them all deliberately.
+
+/** What the voting phase has to work with. Counted once by RoundControl and shared. */
+interface BallotCounts {
+  approved: number;
+  pending: number;
+  rejected: number;
+  total: number;
+}
+
+const countBallot = (rows: ApiSubmission[]): BallotCounts => ({
+  approved: rows.filter((r) => r.reviewStatus === 'approved').length,
+  pending: rows.filter((r) => r.reviewStatus === 'pending').length,
+  rejected: rows.filter((r) => r.reviewStatus === 'rejected').length,
+  total: rows.length,
+});
+
+function EmptyBallotPanel({
+  round,
+  counts,
+  onRoundChange,
+  onSkipped,
+}: {
+  round: CurrentRound;
+  counts: BallotCounts;
+  onRoundChange: () => void | Promise<void>;
+  /** Reported upwards because a successful skip UNMOUNTS this panel with the round. */
+  onSkipped: (message: string) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const { pending, rejected, total } = counts;
+
+  const skip = async () => {
+    setBusy(true);
+    setError(null);
+    const res = await api.admin.skipVoting();
+    if (!res.ok) {
+      // Includes the server's own refusal if an entry was approved in the meantime, which
+      // is the answer an administrator needs rather than a generic failure.
+      setError(res.error);
+      setBusy(false);
+      setConfirming(false);
+      return;
+    }
+    // No state reset on success: the round is ended, so findCurrent returns null and this
+    // panel unmounts with it. Only the failure path above puts the button back.
+    onSkipped(
+      `${roundLabel(round)} is closed with no winner. Open the next round below when you are ready.`
+    );
+    await onRoundChange();
+  };
+
+  return (
+    <Section
+      title="No Ballot to Count"
+      description="This round reached the voting phase with nothing approved, so there is no winner it can produce."
+    >
+      {error && <Banner tone="error" text={error} onDismiss={() => setError(null)} />}
+
+      <div className="flex items-start gap-2.5 bg-amber-400/8 border border-amber-400/25 rounded-xl px-4 py-3">
+        <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-px" />
+        <div className="space-y-1.5">
+          <p className="text-xs text-amber-300/90 leading-relaxed">
+            <span className="font-bold">No approved submissions.</span>{' '}
+            {total === 0
+              ? 'Nobody entered this round.'
+              : `${total} ${total === 1 ? 'entry was' : 'entries were'} submitted` +
+                `${pending > 0 ? `, ${pending} still awaiting review` : ''}` +
+                `${rejected > 0 ? `, ${rejected} rejected` : ''}.`}
+          </p>
+          <p className="text-[11px] text-amber-300/60 leading-relaxed">
+            Counting the ballot is refused while nothing is approved, and the voting deadline
+            will not change that when it passes — a round with no entries has no winner to
+            record, and one will never be invented for it.
+          </p>
+        </div>
+      </div>
+
+      {pending > 0 && (
+        <div className="flex items-start gap-2.5 bg-blue-500/8 border border-blue-500/20 rounded-xl px-4 py-3">
+          <Eye className="w-4 h-4 text-blue-400 flex-shrink-0 mt-px" />
+          <p className="text-xs text-blue-300/90 leading-relaxed">
+            {pending === 1 ? 'One entry is' : `${pending} entries are`} still awaiting review on
+            the Submissions tab. Approving {pending === 1 ? 'it' : 'one'} gives this round a
+            real ballot and the normal close-and-approve flow back. Skip only if you meant to
+            reject {pending === 1 ? 'it' : 'them'}.
+          </p>
+        </div>
+      )}
+
+      {confirming ? (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3 space-y-3">
+          <p className="text-xs text-slate-300 font-bold">
+            End {roundLabel(round)} with no winner?
+          </p>
+          <ul className="text-[11px] text-slate-400 leading-relaxed space-y-1 list-disc list-inside">
+            <li>The round is archived immediately. No winner is recorded, and no challenge starts.</li>
+            <li>It becomes visible to everyone as an ended round, with no winning beatmap.</li>
+            <li>
+              A round cannot be reopened — the next month is a new round, which you open from
+              this tab.
+            </li>
+          </ul>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { void skip(); }}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-black bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <SkipForward className="w-3.5 h-3.5" />
+              {busy ? 'Closing…' : 'Confirm — close with no winner'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirming(false)}
+              className="px-3 py-2 rounded-lg text-[11px] font-bold text-slate-400 hover:text-slate-200 disabled:opacity-30 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm bg-slate-800 border border-slate-700 hover:border-rose-500/50 text-slate-300 hover:text-rose-300 transition-all"
+        >
+          <SkipForward className="w-4 h-4" />
+          Skip Voting &amp; Close Round
+        </button>
+      )}
+    </Section>
+  );
+}
+
 function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; onRoundChange: () => void | Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -553,6 +707,32 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
   const [year, setYear] = useState('');
   const [reward, setReward] = useState('');
   const countdown = useCountdown(round?.endsAt);
+
+  /**
+   * What the open round has to vote on, counted here rather than in EmptyBallotPanel so the
+   * panel and the phase button cannot disagree — offering "Close Voting & Count the Ballot"
+   * beside a panel saying there is no ballot would be two answers to one question.
+   *
+   * null while unread, and on a failed read: guessing would either hide the panel on a round
+   * that needs it or accuse a healthy round of having no ballot, so an unknown count leaves
+   * the normal controls exactly as they were.
+   */
+  const [ballot, setBallot] = useState<BallotCounts | null>(null);
+  const roundId = round?.id ?? null;
+
+  useEffect(() => {
+    if (roundId === null) {
+      setBallot(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const rows = await api.admin.submissions(roundId);
+      if (!live) return;
+      setBallot(rows === null ? null : countBallot(rows));
+    })();
+    return () => { live = false; };
+  }, [roundId, round?.phase, round?.winnerStatus]);
 
   const describe = (result: { status: number; error: string }) =>
     result.status === 0 ? result.error : `${result.error} (HTTP ${result.status})`;
@@ -663,6 +843,14 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
   // with a winner pending has no phase action left — approving one is the only move.
   const ballotClosed = round?.phase === 'voting' && round.winnerStatus !== 'none';
 
+  /**
+   * Voting reached with nothing approved. The phase button is replaced rather than disabled:
+   * "Close Voting & Count the Ballot" can only answer 409 here, and a greyed-out button
+   * explains nothing about why. Requires a known count — see `ballot` above.
+   */
+  const emptyBallot =
+    round?.phase === 'voting' && round.winnerStatus === 'none' && ballot?.approved === 0;
+
   return (
     <div className="space-y-5">
       {error  && <Banner tone="error" text={error}  onDismiss={() => setError(null)} />}
@@ -711,6 +899,14 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
                   voting phase only when you approve the winner below.
                 </p>
               </div>
+            ) : emptyBallot ? (
+              <div className="flex items-start gap-2.5 bg-amber-400/8 border border-amber-400/25 rounded-xl px-4 py-3">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-px" />
+                <p className="text-xs text-amber-300/90">
+                  There is nothing approved to vote on, so there is no ballot to count. Your
+                  options are below.
+                </p>
+              </div>
             ) : (
               <>
                 <button
@@ -728,6 +924,18 @@ function RoundControl({ round, onRoundChange }: { round: CurrentRound | null; on
               </>
             )}
           </Section>
+
+          {/* The empty-ballot escape, above WinnerPanel because the two are mutually
+              exclusive: emptyBallot needs winnerStatus 'none' and WinnerPanel needs it not
+              to be. Nothing approved means there is no winner to approve. */}
+          {emptyBallot && ballot && (
+            <EmptyBallotPanel
+              round={round}
+              counts={ballot}
+              onRoundChange={onRoundChange}
+              onSkipped={(message) => { setError(null); setNotice(message); }}
+            />
+          )}
 
           {ballotClosed && <WinnerPanel round={round} onRoundChange={onRoundChange} />}
 

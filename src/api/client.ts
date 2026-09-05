@@ -603,6 +603,16 @@ export const api = {
     /** Ends the ballot and records a pending or tied winner. Does not advance the phase. */
     closeVoting: () =>
       send<{ ok: boolean; round: ApiRound; tied: number[] }>("POST", "/admin/round/close-voting"),
+    /**
+     * Ends a round whose voting phase has NOTHING approved to vote on.
+     *
+     * The round ends with no winner and no challenge — the honest outcome for a month
+     * nobody entered. The server counts the approved entries itself and refuses with 409 if
+     * there are any, so this cannot discard a real ballot; it is not an alternative to
+     * closeVoting + approveWinner, which stay exactly as they were.
+     */
+    skipVoting: () =>
+      send<{ ok: boolean; round: ApiRound }>("POST", "/admin/round/skip-voting"),
     /** Approves the winner and starts the challenge. submissionId is required on a tie. */
     approveWinner: (submissionId?: number) =>
       send<{ ok: boolean; round: ApiRound }>(

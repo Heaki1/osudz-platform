@@ -55,13 +55,13 @@
   ────────────────────────────────────────────────────────────────────────────────
 
 
-## ITEM STATUS — 48 items
+## ITEM STATUS — 49 items
 
-  44 DONE · 1 TODO · 0 IN PROGRESS · 1 BLOCKED · 1 DECIDED · 1 NOT ASKED
+  45 DONE · 1 TODO · 0 IN PROGRESS · 1 BLOCKED · 1 DECIDED · 1 NOT ASKED
 
   A. SUBMISSION      A1-A5 DONE
   B. VOTING          B1-B12 DONE
-  C. LIFECYCLE       C1-C5 DONE   C6 NOT ASKED   C7-C9 DONE
+  C. LIFECYCLE       C1-C5 DONE   C6 NOT ASKED   C7-C10 DONE
   D. WINNER          D1 DECIDED (implemented by D2 and D3)   D2-D4 DONE
   E. CHALLENGE       E1-E4 DONE
   F. ARCHIVE         F1 DONE   F2 DONE
@@ -1200,6 +1200,54 @@ fix it as its own item with its own commit.
       STATUS Waiting on 011 being applied. Note repo/challengeScores.ts judges challenge
              types BY NAME, so renaming one is not only a settings change — qualifies()
              and orderFor() read those strings.
+
+  C10 Skip an empty voting phase                                          [DONE]
+      THE BUG: a round that reached voting with NOTHING APPROVED had no way forward.
+      closeVoting refuses that case ('no-entries') rather than inventing a winner, and the
+      clock in applyDueTransitions deliberately stops on it — both correct. But that left the
+      round sitting in voting behind a "Close Voting & Count the Ballot" button that could
+      only answer 409, with a countdown that changed nothing when it expired. The generic
+      PATCH /round/phase could end it, but that endpoint does not check whether the ballot is
+      actually empty, so it is not the same control.
+      LANDED: refuseSkipVoting + skipEmptyVoting in repo/rounds.ts, POST
+      /api/admin/round/skip-voting, and an EmptyBallotPanel in Round Control that REPLACES
+      the close-ballot button when nothing is approved.
+      THE ROUND ENDS. No winner, no challenge: a month nobody entered has neither, and the
+      two alternatives are a fabricated winner and a challenge phase with no map to play.
+      skipEmptyVoting only ever writes phase = 'ended', so neither is reachable from it, and
+      voting -> challenge remains absent from NEXT_PHASES so nothing else can reach it either.
+      NO MIGRATION. winner_status stays 'none' and winning_submission_id stays NULL, which is
+      already representable and already handled — 004's CHECK allows only four values, and
+      routes/challenge.ts has always coped with a round archived from a phase that recorded
+      no winner, because F1 could always archive one.
+      THE GUARD IS THE POINT, and it is why this cannot live in the client: the server counts
+      the approved entries itself, inside the transaction that ends the round, and refuses
+      with 'has-entries' if there are any. So the route cannot be used to throw away a real
+      ballot however the request is crafted. refuseSkipVoting is pure and takes the count, so
+      the rule is tested without a database — 6 tests, including the refusal ORDER, because a
+      closed ballot has entries too and reporting THAT would send an administrator looking for
+      the wrong problem.
+      ADMIN-ONLY like everything else in routes/admin.ts, via router.use(requireAdmin); the
+      unauthenticated sweep asserts the 401, and verify-authenticated.mjs asserts that an
+      admin caller is still refused while the round has entries — and that the refusal left
+      the round exactly where it was.
+      THE UI EXPLAINS RATHER THAN DISABLES. A greyed-out button says nothing about why, so
+      the panel names the count: nobody entered, or N submitted with N awaiting review and N
+      rejected. WITH ENTRIES STILL PENDING IT SAYS SO FIRST — the fix is usually to review
+      them, and skipping would throw away somebody's submission. Two-step confirmation, the
+      same pattern as WithdrawButton, spelling out that the round is archived immediately,
+      that no winner is recorded, and that a round cannot be reopened.
+      Its own Discord line, announceVotingSkipped: announcePhase's archive copy would say the
+      round "is over and has been archived" and leave the community to guess why.
+      UNCHANGED, deliberately: with one approved entry none of this appears, and closeVoting,
+      the tiebreak and approveWinner behave exactly as before.
+      KNOWN, NOT FIXED: the lock is on the rounds row, so an approval committed by a third
+      administrator between the count and the UPDATE is still possible — the same window
+      closeVoting has. Benign here: the round ends with no winner either way, and an approved
+      entry in an archived round is a row nobody votes on, not a corrupt result.
+      NO AUDIT ROW. Who skipped is in the server log and the Discord announcement, not the
+      database — recording it properly needs a column, and a migration for one boolean fact
+      was not worth it. Flagged rather than assumed.
 
 # D. WINNER / RESULTS  ← the pivot for E and F
 

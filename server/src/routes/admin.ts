@@ -21,6 +21,7 @@ import {
   isRoundPhase,
   listTiebreakEntries,
   setPhase,
+  skipEmptyVoting,
   toApiRound,
 } from '../repo/rounds.js';
 import {
@@ -63,6 +64,7 @@ import {
   announceBallotClosed,
   announceCorrection,
   announcePhase,
+  announceVotingSkipped,
   announceWinner,
   isConfigured,
 } from '../services/discord.js';
@@ -187,6 +189,60 @@ router.post('/round/close-voting', async (req, res) => {
     res.json({ ok: true, round: toApiRound(outcome.round), tied: outcome.tied });
   } catch (err) {
     fail(res, err, 'close voting');
+  }
+});
+
+// POST /api/admin/round/skip-voting — end a round whose ballot is empty.
+//
+// The escape from a round that reached voting with nothing approved. closeVoting refuses
+// that case ('no-entries') and the clock stops on it, so before this the only ways out were
+// the generic phase endpoint — which does not check that the ballot is actually empty — or
+// waiting for a deadline that changes nothing when it passes.
+//
+// THE ROUND ENDS. No winner, no challenge: a month nobody entered has neither, and the two
+// alternatives are a fabricated winner and a challenge with no map. repo/rounds.ts
+// skipEmptyVoting only ever writes phase = 'ended', so neither is reachable from here.
+//
+// THE SERVER COUNTS THE ENTRIES ITSELF, inside the transaction that ends the round. That is
+// the whole safety property: this cannot be used to throw away a ballot that has entries in
+// it, however the request is crafted, and 'has-entries' is a refusal rather than something
+// the caller can assert its way past. The route is admin-only like every other route in this
+// file — router.use(requireAdmin) at the top — so an ordinary caller gets 401 or 403 before
+// any of this runs.
+//
+// Deliberately takes NO BODY. A confirmation flag would be a courtesy to a mis-click, not a
+// control; the guard above is the control, and the confirmation belongs in the UI.
+router.post('/round/skip-voting', async (req, res) => {
+  try {
+    const open = await findCurrent();
+    if (!open) {
+      res.status(409).json({ error: 'No round is open' });
+      return;
+    }
+
+    const outcome = await skipEmptyVoting(open.id);
+    if (!outcome.ok) {
+      const message =
+        outcome.reason === 'gone'
+          ? 'Round no longer exists'
+          : outcome.reason === 'not-voting'
+            ? `This round is in the ${open.phase} phase, so there is no voting phase to skip`
+            : outcome.reason === 'already-closed'
+              ? 'Voting is already closed for this round — approve the winner instead'
+              : `This round has ${outcome.approvedEntries} approved ` +
+                `${outcome.approvedEntries === 1 ? 'entry' : 'entries'}, so it has a real ` +
+                'ballot. Close voting and approve a winner instead of skipping.';
+      res.status(409).json({ error: message });
+      return;
+    }
+
+    console.log(
+      `[admin] round ${outcome.round.round_number} closed with an empty ballot by user ${req.user?.id}`
+    );
+    announceVotingSkipped(outcome.round);
+    res.json({ ok: true, round: toApiRound(outcome.round) });
+  } catch (err) {
+    fail(res, err, 'skip voting');
   }
 });
 

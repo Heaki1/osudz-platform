@@ -193,6 +193,7 @@ console.log('\n--- every admin route refuses an anonymous caller before it does 
   const admin = [
     ['PATCH',  '/admin/round/phase',        { phase: 'voting' }],
     ['POST',   '/admin/round/close-voting'],
+    ['POST',   '/admin/round/skip-voting'],
     ['POST',   '/admin/round/winner',       { submissionId: 1 }],
     ['GET',    '/admin/round/tiebreak'],
     ['GET',    '/admin/round/corrections'],

@@ -176,9 +176,12 @@ async function applyDueTransitions(round: RoundRow): Promise<RoundRow> {
         total: outcome.round.total_votes,
       });
     }
-    // 'no-entries' leaves the ballot open deliberately. A round with nothing approved
-    // has no winner to record, and closing it would strand it in a state only a
-    // result correction could leave; an administrator decides what to do instead.
+    // 'no-entries' leaves the ballot open deliberately. A round with nothing approved has
+    // no winner to record, and inventing one is the thing this must never do. The clock
+    // therefore stops here and the decision goes to an administrator, who has two: approve
+    // a late entry so there is a ballot, or skip the empty phase and end the round —
+    // skipEmptyVoting below. What it must NOT do is advance on its own, because both of
+    // those are choices about the month rather than about the time.
   }
 
   if (current.phase === 'challenge' && isDue(current.challenge_ends_at)) {
@@ -399,6 +402,117 @@ export async function closeVoting(roundId: number): Promise<CloseVotingOutcome> 
       round: updated[0],
       tied: tied ? leaders.map((leader) => leader.submission_id) : [],
     };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ── The empty ballot ─────────────────────────────────────────────────────────
+//
+// A round can reach the voting phase with nothing approved: nobody entered, or
+// everything that was entered was rejected. closeVoting refuses that case with
+// 'no-entries' rather than inventing a winner, and the clock in applyDueTransitions
+// leaves the ballot open when it happens — which is correct, and also left the round
+// with no way forward except the voting deadline it was already past.
+//
+// This is that way forward. The round ENDS: no winner, no challenge. A month nobody
+// entered has no winner to crown and no map to play, and the alternatives are both
+// lies — a fabricated winner, or a challenge phase with nothing to play.
+//
+// The transition itself was always legal (NEXT_PHASES.voting includes 'ended'), so what
+// is new is not the move but the GUARD: the server counts the approved entries itself
+// and refuses if there are any. That is what stops this being a way to throw away a
+// real ballot, and it is why the check cannot live in the client.
+
+export type SkipVotingRefusal = 'not-voting' | 'already-closed' | 'has-entries';
+
+/** 'gone' is not part of the rule — only the transaction can find the row missing. */
+export type SkipVotingFailure = SkipVotingRefusal | 'gone';
+
+/**
+ * Whether an empty voting phase may be skipped, and if not, which rule refused.
+ *
+ * PURE, and it takes the count rather than reading it, for the same reason isEligible
+ * and checkBeatmapRules do: the rule is then testable without a database, and the
+ * transaction below supplies the facts it has just locked.
+ *
+ * ORDER MATTERS. The phase is checked first because "this round is not voting" is the
+ * more fundamental answer, and an already-closed ballot is reported as such rather than
+ * as having entries — a round that closed with a winner pending has entries too, and
+ * saying so would send an administrator looking for the wrong problem.
+ */
+export function refuseSkipVoting(
+  round: { phase: RoundPhase; winner_status: WinnerStatus },
+  approvedEntries: number
+): SkipVotingRefusal | null {
+  if (round.phase !== 'voting') return 'not-voting';
+  if (round.winner_status !== 'none') return 'already-closed';
+  if (approvedEntries > 0) return 'has-entries';
+  return null;
+}
+
+export type SkipVotingOutcome =
+  | { ok: true; round: RoundRow }
+  | { ok: false; reason: SkipVotingFailure; approvedEntries: number };
+
+/**
+ * Ends a round whose ballot is empty, in one transaction.
+ *
+ * winner_status stays 'none' and winning_submission_id stays NULL, which is already a
+ * representable and honest state: ended, never had a winner. Nothing needed a new
+ * winner_status value — 004_round_winner.sql constrains that column to four, and
+ * routes/challenge.ts already handles a round archived from a phase that recorded no
+ * winner, because F1 could always archive one.
+ *
+ * FOR UPDATE, and the count inside the same transaction, so two administrators cannot
+ * both act on the same ballot. The lock is on the rounds row, so an approval committed
+ * by a third administrator in the instant between the count and the UPDATE is still
+ * possible — the same window closeVoting has. It is benign here: the round ends with no
+ * winner either way, and an approved entry in an archived round is a row nobody votes
+ * on, not a corrupt result. Fabricating a winner or entering the challenge without one
+ * remains impossible by construction, since this only ever writes 'ended'.
+ */
+export async function skipEmptyVoting(roundId: number): Promise<SkipVotingOutcome> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: locked } = await client.query<{ phase: RoundPhase; winner_status: WinnerStatus }>(
+      `SELECT phase, winner_status FROM rounds WHERE id = $1 FOR UPDATE`,
+      [roundId]
+    );
+    const current = locked[0];
+    if (!current) {
+      // Only reachable if the round was deleted between findCurrent and this lock. Its own
+      // reason rather than 'not-voting', which would answer with a phase that no longer
+      // exists — the route's message is built from the phase it read a moment ago.
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'gone', approvedEntries: 0 };
+    }
+
+    const { rows: counted } = await client.query<{ approved: number }>(
+      `SELECT count(*)::int AS approved
+         FROM submissions WHERE round_id = $1 AND status = 'approved'`,
+      [roundId]
+    );
+    const approvedEntries = counted[0]?.approved ?? 0;
+
+    const refusal = refuseSkipVoting(current, approvedEntries);
+    if (refusal !== null) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: refusal, approvedEntries };
+    }
+
+    const { rows: updated } = await client.query<RoundRow>(
+      `UPDATE rounds SET phase = 'ended' WHERE id = $1 RETURNING ${COLUMNS}`,
+      [roundId]
+    );
+
+    await client.query('COMMIT');
+    return { ok: true, round: updated[0] };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
