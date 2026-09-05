@@ -6,38 +6,49 @@
 # with no conversation history. Everything below was true at the moment it was
 # written; re-confirm the live state with the commands at the end.
 #
-# EVERY IMPLEMENTATION ITEM ON THIS ROADMAP IS NOW DONE. What is left is two things
-# only the owner can do and one question only the owner can answer, all named below.
+# EVERY IMPLEMENTATION ITEM ON THIS ROADMAP IS NOW DONE, and every question it raised is
+# answered. What is left is two things only the owner can do, both named below. Nothing in
+# this file is waiting on a decision, and no migration is pending.
 
-  HEAD      43b6e2bffba4b75c653a0b83b8e42641167bf36a
-            43b6e2b "feat: persist per-submission comments"
+  HEAD      5e11f6fcc40ca6b05fa45c1831d075077c5fd200
+            5e11f6f "test: commit the unauthenticated API sweep as a script"
   BRANCH    main
   TREE      clean — nothing uncommitted, nothing stashed
-  BASELINE  1bcad8e, 39 commits back
+  BASELINE  1bcad8e, 43 commits back
 
   VERIFICATION AT THIS COMMIT, all green:
-    npm run typecheck                 PASS
+    npm run typecheck                 PASS   (client)
     cd server && npm run typecheck    PASS
-    npm run build                     PASS
-    npm test                          93 passed (43 client, 50 server)
-    unauthenticated API sweep         53 passed, 0 failed
+    npm run build                     PASS   379 kB, 101 kB gzipped
+    npm test                          99 passed (43 client, 56 server)
+    node verify-public.mjs            63 passed, 0 failed
+    node verify-public.mjs http://localhost:8443/api
+                                      63 passed, 0 failed — same contract through the
+                                      client dev-server proxy, which is the origin a
+                                      browser actually uses
+  MIGRATIONS  001-012, ALL APPLIED. Nothing pending.
+
+  Use `npm test`, not a bare `vitest run`: the root glob reaches into server/, whose tests
+  need SESSION_SECRET out of server/.env and abort without it. The two configs
+  (vitest.client.config.ts, vitest.server.config.ts) exist for exactly that reason.
 
   ────────────────────────────────────────────────────────────────────────────────
-  THE ONE COMMAND WAITING ON HEAKI. Migration 012 adds the comments table. B8's code
-  is written and shipped; its reads answer 503 until this runs, which is what an
-  unapplied migration should look like rather than an empty list.
+  WHAT STILL NEEDS HEAKI. Neither is code, and neither blocks anything else.
 
-    cd C:\Users\heaki\Desktop\newdz\server
-    pnpm run migrate:status     # expect 11 applied, 1 pending: 012_comments.sql
-    pnpm run migrate            # expect "1 of 1 pending migration(s) applied"
+  1  The authenticated half of the verification, which no session here can forge:
 
-  Then, to cover everything that cannot be checked without a session:
+       node verify-authenticated.mjs "<osudz_session cookie value>"
 
-    node verify-authenticated.mjs "<osudz_session cookie value>"
+     Read-only unless --allow-writes. Ten sections. THE LAST ONE REVOKES THE COOKIE YOU
+     PASTE IN — that is the G6 check, and it is deliberately last. Your browser is
+     unaffected; the script's copy stops working, which is the point. With --allow-writes it
+     also runs the C5 challenge rule end to end: partial block, full block, full grant,
+     restore.
 
-  Read-only unless --allow-writes. It now has ten sections. THE LAST ONE REVOKES THE
-  COOKIE YOU PASTE IN — that is the G6 check, and it is deliberately last. Your
-  browser is unaffected; the script's copy stops working, which is the point.
+  2  G1 — delete osu! application 66562. Operational, owner's osu! account only. See the
+     item's own entry; .env is already on OSU_CLIENT_ID=67250, so the rotation is done and
+     deleting the stale application is what remains. The leaked secret stays live until it
+     is deleted or reset.
   ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -58,30 +69,42 @@
   landed, and every decision recorded against it. This table is only the index.
 
 
-## THE ONE OPEN QUESTION
+## THE LAST OPEN QUESTION, ANSWERED — 2026-09-05
 
-  Does a per-player block reach the CHALLENGE?
+  Does a per-player block reach the CHALLENGE?  YES, when it is unambiguous.
 
-  C5 split submitting and voting into two independently controlled capabilities. The
-  challenge is neither, so POST /api/challenge/scores keeps requireEligibleCountry —
-  the country allowlist alone, which is the rule the gate enforced before the split,
-  and what the E2 decision of this date asked for.
+  C5 split submitting and voting into two independently controlled capabilities, which left
+  the challenge belonging to neither: an administrator who blocked somebody from submitting
+  AND voting after an investigation had not stopped them playing the winning map and winning
+  the month's prize. That was a hole, not a policy.
 
-  The consequence: an administrator who blocks somebody from submitting AND voting
-  after an investigation has not stopped them competing in the challenge or winning
-  the prize. That is plausibly not what they meant. It is flagged rather than decided
-  because C5 names two capabilities and neither of them is "challenge", so inventing a
-  third would be inventing policy.
+  THE RULE, canEnterChallenge in server/src/repo/users.ts, gated by requireCanChallenge:
 
-  Either answer is a one-line change in server/src/routes/challenge.ts:
-    keep it            requireEligibleCountry — as now
-    make blocks apply  requireCanSubmit, or a new capability if the distinction matters
+    blocked from BOTH submit and vote   refused
+    granted BOTH                        allowed, whatever the country says
+    anything else, including partial    the country allowlist decides (E2, unchanged)
 
-  Nothing else in this roadmap is waiting on a decision.
+  Why derived rather than a third column: the two capabilities an administrator actually sets
+  are the only inputs, so there is nothing extra to keep in sync, no migration, and no policy
+  frozen into the schema before it has been used in anger. Why not
+  canParticipate('submit') && canParticipate('vote'): that reads every PARTIAL block as a
+  challenge ban, and "no submitting for a month" after a troll entry says nothing about
+  playing the winning map.
+
+  Carried through to the client as ApiUser.canChallenge, so the dashboard states the verdict
+  instead of offering a button that can only answer 403 — the same fix C5 made to the submit
+  page. The admin Users tab shows it as a read-only column beside the two switches that
+  produce it, because "did blocking both actually stop them competing?" is exactly the
+  question those switches raise.
+
+  NOTHING IN THIS ROADMAP IS WAITING ON A DECISION.
 
 
 ## COMMITS THIS SESSION, newest first
 
+  5e11f6f  test: commit the unauthenticated API sweep as a script            H2
+  5e95cc7  feat: let an unambiguous block reach the challenge                 C5 last loose end
+  8523ee4  docs: close out the roadmap — every implementation item is done
   43b6e2b  feat: persist per-submission comments                              B8
   a064c51  feat: add the comments table                                       B8 DDL
   d790293  feat: allow sessions to be revoked                                 G6
@@ -107,8 +130,9 @@
   Five things moved that are worth knowing before editing:
 
   1  requireEligible NO LONGER EXISTS. C5 split it into requireCanSubmit and
-     requireCanVote, resolved through canParticipate in repo/users.ts. The country rule
-     alone survives as requireEligibleCountry, used by the challenge and nothing else.
+     requireCanVote, resolved through canParticipate in repo/users.ts. The challenge has its
+     own gate, requireCanChallenge, resolving canEnterChallenge — the country rule unless an
+     override blocks or grants BOTH capabilities. THREE gates now, one rule file.
   2  isEligible and canParticipate are PURE and take their inputs. The allowlist and the
      per-player override are loaded by the caller, through the caches in
      repo/allowedCountries.ts and repo/participantPermissions.ts. That is what keeps the
@@ -123,34 +147,102 @@
      example, it needs an endpoint.
 
 
+## THE FINAL VERIFICATION PASS, AREA BY AREA — 2026-09-05
+
+  What was actually exercised, and by what. "unit" = npm test, "sweep" = verify-public.mjs,
+  "session" = verify-authenticated.mjs, which needs the owner's cookie.
+
+  comments                  sweep: GET /comments answers 200 with an array, which is the
+                            proof 012 is applied — it was 503 before. Default selector
+                            checked against the explicit one. Non-numeric roundId and
+                            submissionId both 400. unit: threadComments, groupBySubmission,
+                            relativeTime. session: posting, threading, the 2000-char cap.
+  submissions               sweep: the public list contains ONLY approved entries, so a
+                            pending or rejected one is invisible. 400 on a bad id, 404 on a
+                            missing one, 401 on all four write paths. unit: toBeatmap,
+                            REVIEW_PRESENTATION. session: submit, reject, withdraw, resubmit.
+  rejection / resubmission  A3's design, unchanged: a rejected row still occupies the
+                            one-per-round slot, so re-entering means withdrawing first —
+                            which the submission phase allows and later phases do not,
+                            because votes.submission_id cascades. session verifies it.
+  voting / frozen ballots   unit: isBallotOpen and pageAccess, which is what freezes the
+                            ballot on winnerStatus while the phase stays 'voting'. sweep:
+                            401 on cast and retract. session: cast, move, retract, and the
+                            409 once winner_status leaves 'none'.
+  winner approval           unit: canTransition, including the one move a deadline may NOT
+                            make — voting to challenge, which only an approval does.
+                            session: approve, and the refusals.
+  tiebreak                  not unit-testable: closeVoting and approveWinner do their work
+                            in SQL inside a transaction with FOR UPDATE. session covers the
+                            refusals; a real tie needs two entries (see H6).
+  phase transitions         unit: canTransition for every legal and illegal move. The
+                            automatic half runs inside findCurrent, so it needs a due
+                            deadline — nothing is due here, so it is confirmed as a no-op.
+  challenge scores          unit: splitMods, qualifies, orderFor — including that three of
+                            the four requirements live in the ORDER, not in a flag.
+  challenge eligibility     unit: canEnterChallenge, 6 cases. sweep: 401. session with
+                            --allow-writes: partial block, full block, full grant, restore,
+                            plus canChallenge on every roster row recomputed and compared.
+  archive                   sweep: GET /rounds returns an array. Still no ended round, so
+                            only the empty state has ever rendered.
+  favorites                 sweep: 401 on all four routes. unit: favoriteToBeatmap, which
+                            folds an unsubmittable status onto approved. session: add,
+                            remove, import.
+  search                    unit: pickDifficulty, orderHits, isSearchStatus. sweep: 401,
+                            and 25 anonymous calls that never reach osu!.
+  admin controls            sweep: all 22 routes answer 401 before doing anything.
+                            session: the write paths and their refusals.
+  security / rate limiting  sweep: an anonymous burst is 401 throughout and never 429,
+                            which is G3's account-keyed rule holding; a forged cookie and an
+                            unsigned cookie are both refused; refusals carry { error } as
+                            JSON, not an HTML error page.
+  typechecks / build        both PASS, build 379 kB / 101 kB gzipped.
+  browser                   the shell serves on :8443 and proxies /api, and the whole sweep
+                            passes through that proxy. Beyond that, see NOT VERIFIED 6 —
+                            the app has no URL routing.
+
+
 ## KNOWN ISSUES AND WHAT NEEDS THE OWNER
 
   NEEDS THE OWNER'S MACHINE OR ACCOUNT
-    1  `pnpm run migrate` for 012, at the top of this file.
-    2  G1: delete osu! application 66562. Less urgent than it reads — server/.env is
-       already on OSU_CLIENT_ID=67250 and that application authenticates fine, so the
-       rotation is done. Deleting the old app is what remains, and nothing in the repo
-       can do it.
-    3  node verify-authenticated.mjs, also at the top.
+    1  G1: delete osu! application 66562. An EXTERNAL, ACCOUNT-ONLY task — nothing in this
+       repository can do it and no code depends on it. Less urgent than it reads: server/.env
+       is already on OSU_CLIENT_ID=67250 and that application authenticates fine, so the
+       rotation is done and deleting the stale app is what remains. Until it is deleted or
+       its secret reset, the leaked secret stays live.
+    2  node verify-authenticated.mjs, at the top of this file. The only part of the
+       verification a session here cannot reach.
+       (Migration 012 was item 3 here. It is applied — 2026-09-05 — so it is gone.)
 
   NOT VERIFIED, and the reason for each
-    4  Every authenticated path. No way to forge a session here, which is why
+    3  Every authenticated path. No way to forge a session here, which is why
        verify-authenticated.mjs exists and why it has grown to ten sections.
-    5  D4's success path. Correcting a result needs a SECOND entry in the round to correct
-       it to, and this instance has one — the same gap that keeps H6 blocked. Every
+    4  D4's success path. Correcting a result needs a SECOND entry in the round to correct
+       it to, and this instance has only one — the same gap that keeps H6 blocked. Every
        refusal is covered.
-    6  The C2 deadline behaviour. Nothing is due on this instance, so the clock is
+    5  The C2 deadline behaviour. Nothing is due on this instance, so the clock is
        confirmed only as a no-op. Moving a deadline needs an admin session and PATCH
        /api/admin/round/phase with endsAt — NOT a hand-written UPDATE.
-    7  Any page but the dashboard in a browser. THE APP HAS NO URL ROUTING: platformPage
+    6  Any page but the dashboard in a browser. THE APP HAS NO URL ROUTING: platformPage
        is React state with no history sync, so /vote, /search and /archive are not
        addressable and a headless browser cannot reach them. That is also a product gap —
        nobody can link or bookmark a page — and it stays FLAGGED FOR THE OWNER rather than
        fixed, since routing was never asked for. It is now the largest thing on this list.
-    8  A live Discord announcement. DISCORD_WEBHOOK is set, but firing one means advancing
+       WHAT WAS CONFIRMED of the browser surface: the dev server serves the shell on :8443
+       with #root and /src/main.tsx, and it proxies /api to :3001 so the session cookie is
+       same-origin. verify-public.mjs run against http://localhost:8443/api passes all 63
+       checks, so the proxy does not alter the contract. Clicking through phases, voting and
+       commenting still needs a signed-in browser.
+    7  A live Discord announcement. DISCORD_WEBHOOK is set, but firing one means advancing
        a real phase or correcting a real result.
-    9  The archive with real content. No round has ended yet.
-   10  B8 end to end, until 012 is applied.
+    8  The archive with real content. No round has ended yet.
+    9  Writing a comment. The read is confirmed live — GET /api/comments answers 200 with
+       an array rather than the 503 an unapplied migration gave — so the table is there and
+       B8 is done. Posting one needs a session, so it is in verify-authenticated.mjs.
+   10  The tiebreak and correction transactions. closeVoting, approveWinner and
+       correctWinner do their work in SQL inside a transaction with FOR UPDATE, so there is
+       nothing pure left to unit-test; canTransition IS tested, and the rest needs a
+       database and an admin session.
 
   TRAPS FOR THE NEXT SESSION
    11  THIS REPO IS pnpm. `npm install` fails on it with EUNSUPPORTEDPROTOCOL over a
@@ -169,6 +261,15 @@
    16  Two caches are invalidated by hand, not by a TTL: repo/allowedCountries.ts and
        repo/siteSettings.ts. Any new write path to allowed_countries or site_settings must
        call invalidate(), or the gate will keep answering with the old row until restart.
+   17  RUN THE TESTS AS `npm test`, never a bare `vitest run` at the root. The bare command
+       has no config, so its glob reaches into server/, and those tests import env.ts, which
+       exits the process without SESSION_SECRET. Three suites then "fail" for a reason that
+       has nothing to do with the code. vitest.client.config.ts and vitest.server.config.ts
+       exist to keep the two trees apart; `npm test` runs both in turn.
+   18  The interpreter on this machine is `python`, not `python3` — python3 is not on PATH.
+   19  `cd` PERSISTS between shell calls in this harness. A verification pass that runs
+       `cd server && npm test` and then `npm test` runs the server suite twice and reports
+       it as both. Use an absolute cd on every command that depends on the directory.
 
 
 ## STATE OF THE LOCAL INSTANCE
@@ -189,23 +290,29 @@
               live through GET /api/settings.
   COUNTRIES   allowed_countries holds DZ, enabled — 005's seed, confirmed live.
   ARCHIVE     0 ended rounds, so only the empty state has been seen.
-  MIGRATIONS  001-011 applied. 012 written and PENDING.
+  MIGRATIONS  001-012, all applied. 012 was applied 2026-09-05, so B8's reads are live.
 
 
 ## COMMANDS FOR TOMORROW
 
   From C:\Users\heaki\Desktop\newdz
 
-    git log -1 --oneline          # expect 43b6e2b
+    git log -1 --oneline          # expect 5e11f6f
     git status --short            # expect empty
     npm run typecheck             # client
     cd server && npm run typecheck && cd ..
-    npm test                      # expect 43 + 50 passing
+    npm test                      # expect 43 + 56 passing
     npm run build
+    cd server && pnpm run migrate:status   # expect 12 applied, 0 pending
 
   To bring the app up, if it is not already running:
     cd server && pnpm run dev     # API on :3001
     pnpm run dev                  # client on :8443, from the repo root
+
+  Then, with it up:
+    node verify-public.mjs                          # 63 checks, no session needed
+    node verify-public.mjs http://localhost:8443/api   # same, through the client proxy
+    node verify-authenticated.mjs "<cookie>"        # the other half — see above
 
 # ══════════════════════════════════════════════════════════════════════════════
 # END OF CHECKPOINT — the roadmap proper begins below.
@@ -568,8 +675,9 @@ fix it as its own item with its own commit.
       Threading survives as ORDER, since the panel is a flat list; an orphaned reply is kept at
       the end rather than dropped. onOpenComments is deleted: it notified the page for a lazy
       load that never existed, and every call site passed a no-op.
-      STILL TO VERIFY: needs migration 012 applied. Until then the reads answer 503, which is
-      what an unapplied migration should look like rather than an empty list.
+      MIGRATION 012 IS APPLIED — 2026-09-05, all twelve migrations now applied. The reads are
+      live rather than answering 503, so this item is done end to end and nothing about it is
+      waiting on anyone.
       WHAT   comments table (round_id, submission_id, user_id, parent_id, body,
              created_at), GET/POST endpoints, and wire BeatmapCard's existing
              panel to them.
@@ -866,12 +974,21 @@ fix it as its own item with its own commit.
       One rule read in three places: both gates and the canSubmit / canVote flags on ApiUser all
       go through canParticipate, so the button a player sees and the 403 they would get cannot
       disagree.
-      THE CHALLENGE KEEPS THE COUNTRY RULE ALONE, as requireEligibleCountry — E2's decision is
-      that it keeps the gate submitting and voting had before the split. So a per-player block
-      does not reach the challenge. WHETHER IT SHOULD IS FLAGGED, NOT DECIDED: an administrator
-      blocking somebody after an investigation would plausibly expect them out of the challenge
-      too, but C5 names two capabilities and neither is "challenge", so inventing a third would
-      be inventing policy. The owner's call.
+      THE CHALLENGE IS DERIVED FROM THE TWO FLAGS — decided 2026-09-05, and the last loose end
+      of this item. requireCanChallenge resolves canEnterChallenge in repo/users.ts:
+        blocked from BOTH        refuse. The only unambiguous way these two flags say "this
+                                 account does not take part", so leaving the challenge open
+                                 would have let an investigated player still win the prize.
+        granted BOTH             allow, whatever the country says. The same statement inverted.
+        anything else            the country allowlist decides, exactly as E2 asked.
+      A PARTIAL BLOCK STAYS PARTIAL: "no submitting for a month" after a troll entry says
+      nothing about playing the winning map. And it is NOT canParticipate('submit') &&
+      canParticipate('vote'), which would turn every partial block into a challenge ban.
+      NO can_challenge COLUMN AND NO THIRD Capability. The rule is derived from the two an
+      administrator actually sets, so there is nothing extra to keep in sync and no migration
+      behind a policy that may yet be tuned. ApiUser.canChallenge carries the verdict so the
+      dashboard hides the import button instead of offering a 403, and the admin Users tab shows
+      it as a derived, read-only column beside the two switches that produce it.
       A block is forward-only: nothing here touches the votes table.
       DELETED: the six fabricated SAMPLE_USERS, the mock Ban/Unban button, and the "Submissions"
       column that went with them — nothing counts submissions per account. Eleven pieces of
@@ -1359,12 +1476,15 @@ fix it as its own item with its own commit.
       deliberately: that column exists to mark API-imported plays, and its UNIQUE
       constraint is what stops a hand-entered score colliding with an imported one.
       A player must have signed in at least once, since user_id is a real foreign key.
-      DECIDED 2026-09-05, closing what had been flagged as an assumption: POST
-      /challenge/scores KEEPS requireEligible. The challenge is for the same community as
-      submitting and voting, so non-Algerian accounts may read the leaderboard and
-      comment but not compete. Nothing in my_plan.txt settled this either way; it is now
-      settled, and the code already matched, so no change was needed. If it is ever
-      reversed, that one middleware becomes requireAuth and nothing else moves.
+      DECIDED 2026-09-05, closing what had been flagged as an assumption: the country rule
+      GATES /challenge/scores. The challenge is for the same community as submitting and
+      voting, so accounts outside the enabled countries may read the leaderboard and comment
+      but not compete. Nothing in my_plan.txt settled this either way.
+      REFINED later the same day, once C5 had split submitting from voting: the gate is
+      requireCanChallenge, which is the country rule PLUS an unambiguous per-player override
+      — blocked from both capabilities refuses, granted both allows, partial defers to the
+      country rule. See C5 and the closed question at the top of this file. If the country
+      half is ever dropped, canEnterChallenge is the one function that changes.
       DECIDED  BOTH. A player's score on the winning map is fetched automatically
                from the osu! API and recorded in challenge_scores, AND
                administrators must have a manual import or entry option alongside
@@ -1763,6 +1883,16 @@ fix it as its own item with its own commit.
       INSTALL NOTE: this repo is pnpm, and `npm install` fails on it with
       EUNSUPPORTEDPROTOCOL over a workspace:* reference. vitest went in with `pnpm add -D
       vitest`. Use pnpm for dependencies here.
+      GROWN SINCE, to 99 tests over 8 files — 43 client, 56 server. Added along the way:
+      threadComments / groupBySubmission / relativeTime (B8), searchHitToBeatmap and
+      favoriteToBeatmap (H4, A5), pickDifficulty / orderHits / isSearchStatus (H4),
+      checkBeatmapRules across statuses and both bounds (C8), the allowedCountries helpers
+      and canParticipate's three-valued resolution (C4, C5), and canEnterChallenge (the C5
+      challenge rule).
+      AND THE UNAUTHENTICATED SWEEP IS NOW A COMMITTED SCRIPT, verify-public.mjs, 63 checks
+      — it had been a scratch file rewritten from memory each session, so its coverage was
+      only as good as whoever remembered it. It takes a base URL, so it also runs through
+      the client dev-server proxy, which is the origin a browser uses.
       WHAT   vitest in both packages, then tests for the pure logic that is
              easiest to break silently: pageAccess and formatCountdown in
              src/lib/round.ts, toBeatmap and REVIEW_PRESENTATION in
@@ -1955,10 +2085,13 @@ fix it as its own item with its own commit.
                     the max-submissions input is not a setting that exists at all —
                     submissions_one_per_user_per_round fixes it at one. This was the only
                     question the C7 audit produced.
-  challenge gate    POST /api/challenge/scores KEEPS requireEligible. The challenge is for
-                    the same community as submitting and voting; non-Algerian accounts
-                    read and comment but do not compete. The code already matched, so this
-                    changed nothing — it turns E2's flagged ASSUMPTION into a decision.
+  challenge gate    POST /api/challenge/scores KEEPS the country rule. The challenge is for
+                    the same community as submitting and voting; accounts outside the
+                    enabled countries read and comment but do not compete. Turned E2's
+                    flagged ASSUMPTION into a decision; the code already matched.
+                    LATER THE SAME DAY, the follow-on question C5 raised was answered too:
+                    an override that blocks or grants BOTH capabilities reaches the
+                    challenge, a partial one does not. requireCanChallenge.
   work order        Write the DDL for every migration-blocked item as one batch, hand over
                     one command, and build H4 while it waits. H4 was the only open item
                     needing neither a migration nor a decision.
